@@ -1,0 +1,75 @@
+{
+  "devices" : [
+    {
+      "architecture" : "arm64",
+      "deviceId" : "C19ECF87-BD95-40F7-B71D-187097B0C5D9",
+      "deviceName" : "iPhone 17 Pro",
+      "modelName" : "iPhone 17 Pro",
+      "osBuildNumber" : "23A339",
+      "osVersion" : "26.0",
+      "platform" : "iOS Simulator"
+    }
+  ],
+  "duration" : "Ran for 7,9 seconds",
+  "durationInSeconds" : 7.856384992599487,
+  "hasMediaAttachments" : false,
+  "hasPerformanceMetrics" : false,
+  "startTime" : 1760384509.181,
+  "testDescription" : "Test case with 1 run",
+  "testIdentifier" : "AutoFixSamplerUITests/testExample()",
+  "testIdentifierURL" : "test://com.apple.xcode/AutoFixSampler/AutoFixSamplerUITests/AutoFixSamplerUITests/testExample",
+  "testName" : "testExample()",
+  "testPlanConfigurations" : [
+    {
+      "configurationId" : "1",
+      "configurationName" : "Test Scheme Action"
+    }
+  ],
+  "testResult" : "Failed",
+  "testRuns" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "details" : "0~uJ4tX35jRSfebvAeLpKdMCLUedLUX0HAnXQvIhPU11-t67Fp2HPF_ePVjjSEHcNK3LrYptOqdmiC0Z_7agoRmA==",
+                  "name" : "App UI hierarchy for dev.neoneon_0_58166B7D-C4DC-46F7-AB6C-C78C857AF0D9.AutoFixSampler",
+                  "nodeIdentifier" : "49A8669D-4891-44CD-80F7-56DA6C1EFFE5",
+                  "nodeType" : "Attachment"
+                },
+                {
+                  "details" : "0~6xzrHN2l2m6lgIsSOxxCX4dGUr5TLVF9uIDi_6ThR9F7fCAr0Bc732KeJEQno9yomqoH2WO6r3kr4tiJc8nczQ==",
+                  "name" : "UI Snapshot 2025-10-13 at 09.41.56 PM",
+                  "nodeIdentifier" : "0D60804E-9EDF-47CC-989F-11A8DD54DD45",
+                  "nodeType" : "Attachment"
+                },
+                {
+                  "name" : "AutoFixSamplerUITests.testExample()",
+                  "nodeType" : "Source Code Reference"
+                }
+              ],
+              "name" : "Failed to tap \"press me\" Button: No matches found for Elements matching predicate '\"press me\" IN identifiers' from input {(\n    Button, label: 'present me'\n)}",
+              "nodeType" : "Test Case Run",
+              "result" : "Failed"
+            }
+          ],
+          "duration" : "7s",
+          "durationInSeconds" : 7.856384992599487,
+          "name" : "Test Scheme Action",
+          "nodeIdentifier" : "1",
+          "nodeType" : "Test Plan Configuration",
+          "result" : "Failed"
+        }
+      ],
+      "details" : "iOS Simulator 26.0",
+      "duration" : "7s",
+      "durationInSeconds" : 7.856384992599487,
+      "name" : "iPhone 17 Pro",
+      "nodeIdentifier" : "C19ECF87-BD95-40F7-B71D-187097B0C5D9",
+      "nodeType" : "Device",
+      "result" : "Failed"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 mod xcresultparser;
+mod xctestresultdetailparser;
 
 use clap::Parser;
 
