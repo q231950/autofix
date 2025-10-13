@@ -1,3 +1,5 @@
+mod xcresultparser;
+
 use clap::Parser;
 
 /// A simple autofix tool
