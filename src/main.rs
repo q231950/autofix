@@ -1,5 +1,8 @@
 mod autofix_command;
+mod autofix_pipeline;
 mod test_command;
+mod xc_test_result_attachment_handler;
+mod xc_workspace_file_locator;
 mod xcresultparser;
 mod xctestresultdetailparser;
 

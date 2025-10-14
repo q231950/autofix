@@ -1,3 +1,4 @@
+use crate::autofix_pipeline::{AutofixPipeline, PipelineError};
 use crate::xctestresultdetailparser::{XCTestResultDetailParser, XCTestResultDetailParserError};
 use std::path::PathBuf;
 
@@ -5,6 +6,9 @@ use std::path::PathBuf;
 pub enum TestCommandError {
     #[error("Failed to parse test details: {0}")]
     ParseError(#[from] XCTestResultDetailParserError),
+
+    #[error("Failed to run autofix pipeline: {0}")]
+    PipelineError(#[from] PipelineError),
 }
 
 pub struct TestCommand {
@@ -48,6 +52,10 @@ impl TestCommand {
         if print_output {
             Self::print_test_detail(&detail);
         }
+
+        // Run the autofix pipeline
+        let pipeline = AutofixPipeline::new(&self.test_result_path, &self.workspace_path)?;
+        pipeline.run(&detail)?;
 
         Ok(())
     }
@@ -155,6 +163,7 @@ mod tests {
         if let Err(e) = result {
             match e {
                 TestCommandError::ParseError(_) => {}
+                TestCommandError::PipelineError(_) => {}
             }
         }
     }
