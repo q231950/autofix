@@ -1,4 +1,5 @@
-use crate::xcresultparser::{XCResultParser, XCResultParserError};
+use crate::test_command::{TestCommand, TestCommandError};
+use crate::xcresultparser::{XCResultParser, XCResultParserError, XCResultSummary};
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
@@ -8,6 +9,9 @@ pub enum AutofixError {
 
     #[error("No test failures found")]
     NoTestFailures,
+
+    #[error("Failed to get test details: {0}")]
+    TestCommandError(#[from] TestCommandError),
 }
 
 pub struct AutofixCommand {
@@ -35,6 +39,45 @@ impl AutofixCommand {
         let summary = parser.parse(&self.test_result_path)?;
 
         // Display summary information
+        Self::print_summary(&summary);
+
+        // Process failed tests
+        if summary.failed_tests > 0 {
+            Self::print_failed_tests(&summary);
+
+            // Process each failed test
+            println!("Processing failed tests...");
+            println!();
+            for (index, failure) in summary.test_failures.iter().enumerate() {
+                println!("═══════════════════════════════════════════════════════════");
+                println!(
+                    "Processing test {}/{}: {}",
+                    index + 1,
+                    summary.failed_tests,
+                    failure.test_name
+                );
+                println!("═══════════════════════════════════════════════════════════");
+                println!();
+
+                // Use test command to get detailed information
+                let test_cmd = TestCommand::new(
+                    self.test_result_path.clone(),
+                    self.workspace_path.clone(),
+                    failure.test_identifier_url.clone(),
+                );
+
+                test_cmd.execute_ios_silent()?;
+                println!();
+            }
+        } else {
+            return Err(AutofixError::NoTestFailures);
+        }
+
+        Ok(())
+    }
+
+    /// Print the test summary
+    fn print_summary(summary: &XCResultSummary) {
         println!("Test Summary:");
         println!("  Title: {}", summary.title);
         println!("  Result: {}", summary.result);
@@ -43,22 +86,18 @@ impl AutofixCommand {
         println!("  Failed: {}", summary.failed_tests);
         println!("  Skipped: {}", summary.skipped_tests);
         println!();
+    }
 
-        // List failed tests
-        if summary.failed_tests > 0 {
-            println!("Failed Tests:");
-            for (index, failure) in summary.test_failures.iter().enumerate() {
-                println!("  {}. {}", index + 1, failure.test_name);
-                println!("     Target: {}", failure.target_name);
-                println!("     Test ID: {}", failure.test_identifier_string);
-                println!("     Failure: {}", failure.failure_text);
-                println!();
-            }
-        } else {
-            return Err(AutofixError::NoTestFailures);
+    /// Print the list of failed tests
+    fn print_failed_tests(summary: &XCResultSummary) {
+        println!("Failed Tests:");
+        for (index, failure) in summary.test_failures.iter().enumerate() {
+            println!("  {}. {}", index + 1, failure.test_name);
+            println!("     Target: {}", failure.target_name);
+            println!("     Test ID: {}", failure.test_identifier_string);
+            println!("     Failure: {}", failure.failure_text);
+            println!();
         }
-
-        Ok(())
     }
 
     /// Execute the autofix command for Android (not yet implemented)
@@ -102,6 +141,7 @@ mod tests {
             match e {
                 AutofixError::XCResultParseError(_) => {}
                 AutofixError::NoTestFailures => {}
+                AutofixError::TestCommandError(_) => {}
             }
         }
     }

@@ -1,10 +1,12 @@
 mod autofix_command;
+mod test_command;
 mod xcresultparser;
 mod xctestresultdetailparser;
 
 use autofix_command::AutofixCommand;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use test_command::TestCommand;
 
 /// A tool to automatically fix failing UI tests
 #[derive(Parser, Debug)]
@@ -35,6 +37,28 @@ enum Commands {
         #[arg(long, required_if_eq("ios", "true"))]
         workspace: Option<PathBuf>,
     },
+    /// Get details for a specific test
+    Test {
+        /// Run test command for iOS tests
+        #[arg(short = 'i', long, conflicts_with = "android")]
+        ios: bool,
+
+        /// Run test command for Android tests (not yet implemented)
+        #[arg(short = 'a', long, conflicts_with = "ios")]
+        android: bool,
+
+        /// Path to the test result file (xcresult for iOS)
+        #[arg(long, required_if_eq("ios", "true"))]
+        test_result: Option<PathBuf>,
+
+        /// Path to the workspace/project
+        #[arg(long, required_if_eq("ios", "true"))]
+        workspace: Option<PathBuf>,
+
+        /// Test ID to fetch details for
+        #[arg(short = 't', long, required_if_eq("ios", "true"))]
+        test_id: Option<String>,
+    },
 }
 
 fn main() {
@@ -63,6 +87,42 @@ fn main() {
                 let cmd = AutofixCommand::new(
                     test_result.unwrap_or_default(),
                     workspace.unwrap_or_default(),
+                );
+
+                if let Err(e) = cmd.execute_android() {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: Either --ios or --android must be specified");
+                std::process::exit(1);
+            }
+        }
+        Commands::Test {
+            ios,
+            android,
+            test_result,
+            workspace,
+            test_id,
+        } => {
+            if ios {
+                // iOS test details
+                let test_result_path = test_result.expect("--test-result is required for iOS");
+                let workspace_path = workspace.expect("--workspace is required for iOS");
+                let test_id_str = test_id.expect("--test-id is required for iOS");
+
+                let cmd = TestCommand::new(test_result_path, workspace_path, test_id_str);
+
+                if let Err(e) = cmd.execute_ios() {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else if android {
+                // Android test details
+                let cmd = TestCommand::new(
+                    test_result.unwrap_or_default(),
+                    workspace.unwrap_or_default(),
+                    test_id.unwrap_or_default(),
                 );
 
                 if let Err(e) = cmd.execute_android() {
