@@ -13,51 +13,33 @@ use test_command::TestCommand;
 #[command(name = "autofix")]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Run autofix for iOS tests
+    #[arg(short = 'i', long, conflicts_with = "android", global = true)]
+    ios: bool,
+
+    /// Run autofix for Android tests (not yet implemented)
+    #[arg(short = 'a', long, conflicts_with = "ios", global = true)]
+    android: bool,
+
+    /// Path to the test result file (xcresult for iOS)
+    #[arg(long, required_if_eq("ios", "true"), global = true)]
+    test_result: Option<PathBuf>,
+
+    /// Path to the workspace/project
+    #[arg(long, required_if_eq("ios", "true"), global = true)]
+    workspace: Option<PathBuf>,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Run autofix on test results
-    Autofix {
-        /// Run autofix for iOS tests
-        #[arg(short = 'i', long, conflicts_with = "android")]
-        ios: bool,
-
-        /// Run autofix for Android tests (not yet implemented)
-        #[arg(short = 'a', long, conflicts_with = "ios")]
-        android: bool,
-
-        /// Path to the test result file (xcresult for iOS)
-        #[arg(long, required_if_eq("ios", "true"))]
-        test_result: Option<PathBuf>,
-
-        /// Path to the workspace/project
-        #[arg(long, required_if_eq("ios", "true"))]
-        workspace: Option<PathBuf>,
-    },
     /// Get details for a specific test
     Test {
-        /// Run test command for iOS tests
-        #[arg(short = 'i', long, conflicts_with = "android")]
-        ios: bool,
-
-        /// Run test command for Android tests (not yet implemented)
-        #[arg(short = 'a', long, conflicts_with = "ios")]
-        android: bool,
-
-        /// Path to the test result file (xcresult for iOS)
-        #[arg(long, required_if_eq("ios", "true"))]
-        test_result: Option<PathBuf>,
-
-        /// Path to the workspace/project
-        #[arg(long, required_if_eq("ios", "true"))]
-        workspace: Option<PathBuf>,
-
         /// Test ID to fetch details for
-        #[arg(short = 't', long, required_if_eq("ios", "true"))]
-        test_id: Option<String>,
+        #[arg(short = 't', long)]
+        test_id: String,
     },
 }
 
@@ -65,28 +47,25 @@ fn main() {
     let args = Args::parse();
 
     match args.command {
-        Commands::Autofix {
-            ios,
-            android,
-            test_result,
-            workspace,
-        } => {
-            if ios {
-                // iOS autofix
-                let test_result_path = test_result.expect("--test-result is required for iOS");
-                let workspace_path = workspace.expect("--workspace is required for iOS");
+        // Handle "autofix test --test-id ..." subcommand
+        Some(Commands::Test { test_id }) => {
+            if args.ios {
+                // iOS test details
+                let test_result_path = args.test_result.expect("--test-result is required for iOS");
+                let workspace_path = args.workspace.expect("--workspace is required for iOS");
 
-                let cmd = AutofixCommand::new(test_result_path, workspace_path);
+                let cmd = TestCommand::new(test_result_path, workspace_path, test_id);
 
                 if let Err(e) = cmd.execute_ios() {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
-            } else if android {
-                // Android autofix
-                let cmd = AutofixCommand::new(
-                    test_result.unwrap_or_default(),
-                    workspace.unwrap_or_default(),
+            } else if args.android {
+                // Android test details
+                let cmd = TestCommand::new(
+                    args.test_result.unwrap_or_default(),
+                    args.workspace.unwrap_or_default(),
+                    test_id,
                 );
 
                 if let Err(e) = cmd.execute_android() {
@@ -98,31 +77,24 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Test {
-            ios,
-            android,
-            test_result,
-            workspace,
-            test_id,
-        } => {
-            if ios {
-                // iOS test details
-                let test_result_path = test_result.expect("--test-result is required for iOS");
-                let workspace_path = workspace.expect("--workspace is required for iOS");
-                let test_id_str = test_id.expect("--test-id is required for iOS");
+        // Handle "autofix --ios ..." (no subcommand - process all tests)
+        None => {
+            if args.ios {
+                // iOS autofix - process all failed tests
+                let test_result_path = args.test_result.expect("--test-result is required for iOS");
+                let workspace_path = args.workspace.expect("--workspace is required for iOS");
 
-                let cmd = TestCommand::new(test_result_path, workspace_path, test_id_str);
+                let cmd = AutofixCommand::new(test_result_path, workspace_path);
 
                 if let Err(e) = cmd.execute_ios() {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
-            } else if android {
-                // Android test details
-                let cmd = TestCommand::new(
-                    test_result.unwrap_or_default(),
-                    workspace.unwrap_or_default(),
-                    test_id.unwrap_or_default(),
+            } else if args.android {
+                // Android autofix
+                let cmd = AutofixCommand::new(
+                    args.test_result.unwrap_or_default(),
+                    args.workspace.unwrap_or_default(),
                 );
 
                 if let Err(e) = cmd.execute_android() {
