@@ -17,13 +17,15 @@ pub enum AutofixError {
 pub struct AutofixCommand {
     test_result_path: PathBuf,
     workspace_path: PathBuf,
+    knightrider_mode: bool,
 }
 
 impl AutofixCommand {
-    pub fn new(test_result_path: PathBuf, workspace_path: PathBuf) -> Self {
+    pub fn new(test_result_path: PathBuf, workspace_path: PathBuf, knightrider_mode: bool) -> Self {
         Self {
             test_result_path,
             workspace_path,
+            knightrider_mode,
         }
     }
 
@@ -64,6 +66,7 @@ impl AutofixCommand {
                     self.test_result_path.clone(),
                     self.workspace_path.clone(),
                     failure.test_identifier_url.clone(),
+                    self.knightrider_mode,
                 );
 
                 test_cmd.execute_ios_silent().await?;
@@ -116,6 +119,7 @@ mod tests {
         let cmd = AutofixCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
+            false,
         );
 
         assert_eq!(
@@ -130,6 +134,7 @@ mod tests {
         let cmd = AutofixCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
+            false,
         );
 
         // This will only work if the fixture exists

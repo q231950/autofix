@@ -1,6 +1,7 @@
 mod autofix_command;
 mod autofix_pipeline;
 mod test_command;
+mod tools;
 mod xc_test_result_attachment_handler;
 mod xc_workspace_file_locator;
 mod xcresultparser;
@@ -32,6 +33,10 @@ struct Args {
     #[arg(long, required_if_eq("ios", "true"), global = true)]
     workspace: Option<PathBuf>,
 
+    /// Enable Knight Rider mode: AI agent with tools to automatically fix code
+    #[arg(long, global = true)]
+    knightrider: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -58,7 +63,8 @@ async fn main() {
                 let test_result_path = args.test_result.expect("--test-result is required for iOS");
                 let workspace_path = args.workspace.expect("--workspace is required for iOS");
 
-                let cmd = TestCommand::new(test_result_path, workspace_path, test_id);
+                let cmd =
+                    TestCommand::new(test_result_path, workspace_path, test_id, args.knightrider);
 
                 if let Err(e) = cmd.execute_ios().await {
                     eprintln!("Error: {}", e);
@@ -70,6 +76,7 @@ async fn main() {
                     args.test_result.unwrap_or_default(),
                     args.workspace.unwrap_or_default(),
                     test_id,
+                    args.knightrider,
                 );
 
                 if let Err(e) = cmd.execute_android() {
@@ -88,7 +95,7 @@ async fn main() {
                 let test_result_path = args.test_result.expect("--test-result is required for iOS");
                 let workspace_path = args.workspace.expect("--workspace is required for iOS");
 
-                let cmd = AutofixCommand::new(test_result_path, workspace_path);
+                let cmd = AutofixCommand::new(test_result_path, workspace_path, args.knightrider);
 
                 if let Err(e) = cmd.execute_ios().await {
                     eprintln!("Error: {}", e);
@@ -99,6 +106,7 @@ async fn main() {
                 let cmd = AutofixCommand::new(
                     args.test_result.unwrap_or_default(),
                     args.workspace.unwrap_or_default(),
+                    args.knightrider,
                 );
 
                 if let Err(e) = cmd.execute_android() {

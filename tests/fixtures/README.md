@@ -12,7 +12,7 @@ A placeholder directory for an Xcode test result bundle. Replace with a real `.x
 # Run tests and generate xcresult bundle
 xcodebuild test \
   -scheme YourScheme \
-  -destination 'platform=iOS Simulator,name=iPhone 15' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -resultBundlePath ./test.xcresult
 
 # Copy to fixtures directory

@@ -12,3 +12,5 @@ uuid = { version = "1.18.1", features = ["v4"] }
 anthropic-sdk-rust = "0.1.0"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 base64 = "0.22"
+regex = "1.11"
+glob = "0.3"

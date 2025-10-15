@@ -1,10 +1,14 @@
+use crate::tools::{
+    CodeEditorInput, CodeEditorTool, DirectoryInspectorInput, DirectoryInspectorTool,
+    TestRunnerInput, TestRunnerTool,
+};
 use crate::xc_test_result_attachment_handler::{
     AttachmentHandlerError, XCTestResultAttachmentHandler,
 };
 use crate::xc_workspace_file_locator::{FileLocatorError, XCWorkspaceFileLocator};
 use crate::xctestresultdetailparser::XCTestResultDetail;
 use anthropic_sdk::{
-    Anthropic, ContentBlock, ContentBlockParam, MessageContent, MessageCreateBuilder,
+    Anthropic, ContentBlock, ContentBlockParam, MessageContent, MessageCreateBuilder, Tool,
 };
 use base64::Engine;
 use std::fs;
@@ -30,11 +34,16 @@ pub struct AutofixPipeline {
     xcresult_path: PathBuf,
     workspace_path: PathBuf,
     temp_dir: PathBuf,
+    knightrider_mode: bool,
 }
 
 impl AutofixPipeline {
     /// Create a new AutofixPipeline and initialize the temporary directory
-    pub fn new<P: AsRef<Path>>(xcresult_path: P, workspace_path: P) -> Result<Self, PipelineError> {
+    pub fn new<P: AsRef<Path>>(
+        xcresult_path: P,
+        workspace_path: P,
+        knightrider_mode: bool,
+    ) -> Result<Self, PipelineError> {
         // Create .autofix/tmp directory in current directory
         let base_dir = PathBuf::from(".autofix/tmp");
         fs::create_dir_all(&base_dir)?;
@@ -50,6 +59,7 @@ impl AutofixPipeline {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
             workspace_path: workspace_path.as_ref().to_path_buf(),
             temp_dir,
+            knightrider_mode,
         })
     }
 
@@ -162,9 +172,55 @@ impl AutofixPipeline {
         // Find the latest simulator snapshot
         let snapshot_path = self.find_latest_snapshot();
 
-        // Create the prompt
-        let prompt = format!(
-            r#"I am analyzing a failed iOS UI test and need your help to find a possible solution.
+        // Create the prompt based on mode
+        let prompt = if self.knightrider_mode {
+            format!(
+                r#"I am analyzing a failed iOS UI test and need you to AUTOMATICALLY FIX IT using the provided tools.
+
+**Failed Test:** {}
+**Test Identifier:** {}
+**Workspace Path:** {}
+
+**Test File Contents:**
+```swift
+{}
+```
+
+{}
+
+YOUR TASK: Use the available tools to automatically fix this test. You should:
+
+1. Use `directory_inspector` to explore the codebase and understand the app structure
+2. Use `directory_inspector` to read relevant source files that the test interacts with
+3. Identify the root cause of the test failure
+4. Use `code_editor` to make necessary code changes to fix the issue
+5. Use `test_runner` with operation "build" to verify your changes compile
+6. Use `test_runner` with operation "test" to verify the test now passes
+
+IMPORTANT INSTRUCTIONS:
+- You MUST use the tools to make actual changes to the code
+- Make targeted, minimal changes to fix the specific test failure
+- After each code change, build and test to verify
+- If the first fix doesn't work, iterate and try different approaches
+- Focus on fixing the app code or test code based on what's actually wrong
+- Common issues: missing UI elements, incorrect accessibility IDs, timing/race conditions, wrong assertions
+
+The test identifier format is: {}
+Use this full identifier when calling test_runner."#,
+                detail.test_name,
+                detail.test_identifier_url,
+                self.workspace_path.display(),
+                test_file_contents,
+                if snapshot_path.is_some() {
+                    "**Simulator Snapshot:** I've attached the latest simulator screenshot showing the state when the test failed."
+                } else {
+                    "**Note:** No simulator snapshot was available for this test."
+                },
+                detail.test_identifier_url
+            )
+        } else {
+            format!(
+                r#"I am analyzing a failed iOS UI test and need your help to find a possible solution.
 
 **Failed Test:** {}
 
@@ -186,14 +242,15 @@ Focus on common UI test issues like:
 - Race conditions or animations
 - UI state mismatches
 - Assertion failures"#,
-            detail.test_name,
-            test_file_contents,
-            if snapshot_path.is_some() {
-                "**Simulator Snapshot:** I've attached the latest simulator screenshot showing the state when the test failed."
-            } else {
-                "**Note:** No simulator snapshot was available for this test."
-            }
-        );
+                detail.test_name,
+                test_file_contents,
+                if snapshot_path.is_some() {
+                    "**Simulator Snapshot:** I've attached the latest simulator screenshot showing the state when the test failed."
+                } else {
+                    "**Note:** No simulator snapshot was available for this test."
+                }
+            )
+        };
 
         // Print the prompt
         println!("Sending prompt to Claude:");
@@ -215,7 +272,20 @@ Focus on common UI test issues like:
             }
         }
 
-        // Create and send the message request
+        if self.knightrider_mode {
+            // Knight Rider mode: enable tool use
+            self.run_with_tools(client, content_blocks, detail).await
+        } else {
+            // Regular mode: just get analysis
+            self.run_without_tools(client, content_blocks).await
+        }
+    }
+
+    async fn run_without_tools(
+        &self,
+        client: Anthropic,
+        content_blocks: Vec<ContentBlockParam>,
+    ) -> Result<(), PipelineError> {
         let message = client
             .messages()
             .create(
@@ -225,13 +295,11 @@ Focus on common UI test issues like:
             )
             .await;
 
-        // Handle the response
         match message {
             Ok(response) => {
                 println!("✓ Received response from Claude:");
                 println!();
 
-                // Extract and print the text from the response
                 for content in &response.content {
                     if let ContentBlock::Text { text } = content {
                         println!("{}", text);
@@ -246,6 +314,175 @@ Focus on common UI test issues like:
                 Err(PipelineError::AnthropicApiError(e.to_string()))
             }
         }
+    }
+
+    async fn run_with_tools(
+        &self,
+        client: Anthropic,
+        initial_content: Vec<ContentBlockParam>,
+        _detail: &XCTestResultDetail,
+    ) -> Result<(), PipelineError> {
+        // Create tool instances
+        let dir_tool = DirectoryInspectorTool::new();
+        let code_tool = CodeEditorTool::new();
+        let test_tool = TestRunnerTool::new();
+
+        // Build tools for Anthropic API
+        let tools: Vec<Tool> = vec![
+            serde_json::from_value(dir_tool.to_anthropic_tool()).unwrap(),
+            serde_json::from_value(code_tool.to_anthropic_tool()).unwrap(),
+            serde_json::from_value(test_tool.to_anthropic_tool()).unwrap(),
+        ];
+
+        // Track conversation history: (user_content, assistant_content)
+        let mut conversation_history: Vec<(Vec<ContentBlockParam>, Vec<ContentBlock>)> = vec![];
+        let mut current_user_content = initial_content;
+        let max_iterations = 20; // Prevent infinite loops
+
+        for iteration in 0..max_iterations {
+            println!("\n🤖 Knight Rider iteration {}...", iteration + 1);
+
+            // Build the message with full conversation history
+            let mut builder = MessageCreateBuilder::new("claude-3-5-haiku-latest", 1024);
+
+            // Add all previous conversation turns
+            for (user_content, assistant_content) in &conversation_history {
+                builder = builder.user(MessageContent::Blocks(user_content.clone()));
+
+                // Convert ContentBlock (response) to ContentBlockParam (request) for assistant message
+                let assistant_blocks: Vec<ContentBlockParam> = assistant_content
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text { text } => {
+                            Some(ContentBlockParam::Text { text: text.clone() })
+                        }
+                        ContentBlock::ToolUse { id, name, input } => {
+                            Some(ContentBlockParam::ToolUse {
+                                id: id.clone(),
+                                name: name.clone(),
+                                input: input.clone(),
+                            })
+                        }
+                        _ => None,
+                    })
+                    .collect();
+
+                if !assistant_blocks.is_empty() {
+                    builder = builder.assistant(MessageContent::Blocks(assistant_blocks));
+                }
+            }
+
+            // Add current user message
+            builder = builder.user(MessageContent::Blocks(current_user_content.clone()));
+
+            // Add tools
+            builder = builder.tools(tools.clone());
+
+            let message = client.messages().create(builder.build()).await;
+
+            let response = match message {
+                Ok(resp) => resp,
+                Err(e) => {
+                    println!("✗ API Error: {}", e);
+                    return Err(PipelineError::AnthropicApiError(e.to_string()));
+                }
+            };
+
+            // Check stop reason
+            let has_tool_use = response
+                .content
+                .iter()
+                .any(|c| matches!(c, ContentBlock::ToolUse { .. }));
+
+            // Print text responses
+            for content in &response.content {
+                if let ContentBlock::Text { text } = content {
+                    println!("\n💭 Claude says:\n{}\n", text);
+                }
+            }
+
+            if !has_tool_use {
+                println!("\n✓ Knight Rider finished!");
+                return Ok(());
+            }
+
+            // Execute tool calls
+            let mut tool_results = Vec::new();
+            for content in &response.content {
+                if let ContentBlock::ToolUse { id, name, input } = content {
+                    println!("\n🔧 Tool call: {} (id: {})", name, id);
+                    println!(
+                        "   Input: {}",
+                        serde_json::to_string_pretty(input).unwrap_or_default()
+                    );
+
+                    let result = match name.as_str() {
+                        "directory_inspector" => {
+                            let tool_input: DirectoryInspectorInput =
+                                serde_json::from_value(input.clone()).map_err(|e| {
+                                    PipelineError::AnthropicApiError(format!(
+                                        "Invalid tool input: {}",
+                                        e
+                                    ))
+                                })?;
+                            let result = dir_tool.execute(tool_input, &self.workspace_path);
+                            serde_json::to_value(&result).unwrap()
+                        }
+                        "code_editor" => {
+                            let tool_input: CodeEditorInput = serde_json::from_value(input.clone())
+                                .map_err(|e| {
+                                    PipelineError::AnthropicApiError(format!(
+                                        "Invalid tool input: {}",
+                                        e
+                                    ))
+                                })?;
+                            let result = code_tool.execute(tool_input, &self.workspace_path);
+                            println!("   ✏️ Edit result: {}", result.message);
+                            serde_json::to_value(&result).unwrap()
+                        }
+                        "test_runner" => {
+                            let tool_input: TestRunnerInput = serde_json::from_value(input.clone())
+                                .map_err(|e| {
+                                    PipelineError::AnthropicApiError(format!(
+                                        "Invalid tool input: {}",
+                                        e
+                                    ))
+                                })?;
+                            let result = test_tool.execute(tool_input, &self.workspace_path);
+                            println!(
+                                "   🧪 Test result: {} (exit code: {})",
+                                result.message, result.exit_code
+                            );
+                            if result.success {
+                                println!("   ✅ SUCCESS!");
+                            }
+                            serde_json::to_value(&result).unwrap()
+                        }
+                        _ => serde_json::json!({"error": format!("Unknown tool: {}", name)}),
+                    };
+
+                    tool_results.push(ContentBlockParam::ToolResult {
+                        tool_use_id: id.clone(),
+                        content: Some(result.to_string()),
+                        is_error: Some(false),
+                    });
+                }
+            }
+
+            // Save this turn to conversation history
+            conversation_history.push((current_user_content.clone(), response.content.clone()));
+
+            // Update current_user_content to be the tool results for the next iteration
+            if !tool_results.is_empty() {
+                current_user_content = tool_results;
+            } else {
+                // No tool results but Claude didn't finish - shouldn't happen but handle it
+                break;
+            }
+        }
+
+        println!("\n⚠️ Maximum iterations reached");
+        Ok(())
     }
 
     /// Run the autofix pipeline for a given test result detail
@@ -291,7 +528,8 @@ mod tests {
 
     #[test]
     fn test_pipeline_creation() {
-        let pipeline = AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace");
+        let pipeline =
+            AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace", false);
 
         assert!(pipeline.is_ok());
         let pipeline = pipeline.unwrap();
@@ -307,7 +545,8 @@ mod tests {
     #[test]
     fn test_pipeline_temp_dir_has_uuid() {
         let pipeline =
-            AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace").unwrap();
+            AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace", false)
+                .unwrap();
 
         let dir_name = pipeline.temp_dir.file_name().unwrap().to_string_lossy();
 

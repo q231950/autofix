@@ -15,14 +15,21 @@ pub struct TestCommand {
     test_result_path: PathBuf,
     workspace_path: PathBuf,
     test_id: String,
+    knightrider_mode: bool,
 }
 
 impl TestCommand {
-    pub fn new(test_result_path: PathBuf, workspace_path: PathBuf, test_id: String) -> Self {
+    pub fn new(
+        test_result_path: PathBuf,
+        workspace_path: PathBuf,
+        test_id: String,
+        knightrider_mode: bool,
+    ) -> Self {
         Self {
             test_result_path,
             workspace_path,
             test_id,
+            knightrider_mode,
         }
     }
 
@@ -33,7 +40,7 @@ impl TestCommand {
 
     /// Execute the test command for iOS without printing (for use by autofix command)
     pub async fn execute_ios_silent(&self) -> Result<(), TestCommandError> {
-        self.execute_ios_internal(false).await
+        self.execute_ios_internal(true).await
     }
 
     async fn execute_ios_internal(&self, print_output: bool) -> Result<(), TestCommandError> {
@@ -54,7 +61,11 @@ impl TestCommand {
         }
 
         // Run the autofix pipeline
-        let pipeline = AutofixPipeline::new(&self.test_result_path, &self.workspace_path)?;
+        let pipeline = AutofixPipeline::new(
+            &self.test_result_path,
+            &self.workspace_path,
+            self.knightrider_mode,
+        )?;
         pipeline.run(&detail).await?;
 
         Ok(())
@@ -137,6 +148,7 @@ mod tests {
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             "test://example".to_string(),
+            false,
         );
 
         assert_eq!(
@@ -153,6 +165,7 @@ mod tests {
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             "test://com.apple.xcode/AutoFixSampler/AutoFixSamplerUITests/AutoFixSamplerUITests/testExample".to_string(),
+            false,
         );
 
         // This will only work if the fixture exists
