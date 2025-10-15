@@ -94,11 +94,6 @@ impl XCResultParser {
     }
 
     /// Create a new XCResultParser with a custom xcresulttool path
-    pub fn with_path<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            xcresulttool_path: path.as_ref().to_path_buf(),
-        }
-    }
 
     /// Parse a .xcresult bundle at the given path
     pub fn parse<P: AsRef<Path>>(
@@ -174,14 +169,6 @@ mod tests {
             }
             Err(e) => panic!("Unexpected error: {}", e),
         }
-    }
-
-    #[test]
-    fn test_parser_with_custom_path() {
-        let parser = XCResultParser::with_path("/usr/bin/xcrun");
-        let result = parser.parse("/nonexistent/path.xcresult");
-
-        assert!(result.is_err());
     }
 
     #[test]

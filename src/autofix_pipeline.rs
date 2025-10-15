@@ -106,11 +106,6 @@ impl AutofixPipeline {
         Ok(())
     }
 
-    /// Get the temporary directory path
-    pub fn temp_dir(&self) -> &Path {
-        &self.temp_dir
-    }
-
     /// Clean up the temporary directory
     pub fn cleanup(&self) -> Result<(), PipelineError> {
         if self.temp_dir.exists() {
@@ -143,8 +138,8 @@ mod tests {
         let pipeline = pipeline.unwrap();
 
         // Verify temp directory was created
-        assert!(pipeline.temp_dir().exists());
-        assert!(pipeline.temp_dir().starts_with(".autofix/tmp"));
+        assert!(pipeline.temp_dir.exists());
+        assert!(pipeline.temp_dir.starts_with(".autofix/tmp"));
 
         // Cleanup
         pipeline.cleanup().unwrap();
@@ -155,7 +150,7 @@ mod tests {
         let pipeline =
             AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace").unwrap();
 
-        let dir_name = pipeline.temp_dir().file_name().unwrap().to_string_lossy();
+        let dir_name = pipeline.temp_dir.file_name().unwrap().to_string_lossy();
 
         // Verify it's a valid UUID format
         assert!(Uuid::parse_str(&dir_name).is_ok());

@@ -106,13 +106,6 @@ impl XCTestResultDetailParser {
         }
     }
 
-    /// Create a new XCTestResultDetailParser with a custom xcresulttool path
-    pub fn with_path<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            xcresulttool_path: path.as_ref().to_path_buf(),
-        }
-    }
-
     /// Parse test details for a specific test ID from a .xcresult bundle
     pub fn parse<P: AsRef<Path>>(
         &self,
@@ -189,14 +182,6 @@ mod tests {
             Err(XCTestResultDetailParserError::EmptyTestId) => {}
             _ => panic!("Expected EmptyTestId error"),
         }
-    }
-
-    #[test]
-    fn test_parser_with_custom_path() {
-        let parser = XCTestResultDetailParser::with_path("/usr/bin/xcrun");
-        let result = parser.parse("/nonexistent/path.xcresult", "test://example");
-
-        assert!(result.is_err());
     }
 
     #[test]
