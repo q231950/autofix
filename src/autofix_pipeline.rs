@@ -46,18 +46,13 @@ impl AutofixPipeline {
         })
     }
 
-    /// Run the autofix pipeline for a given test result detail
-    pub fn run(&self, detail: &XCTestResultDetail) -> Result<(), PipelineError> {
-        println!("\n========================================");
-        println!("Running Autofix Pipeline");
-        println!("========================================\n");
-
-        // Step 1: Fetch attachments
+    /// Step 1: Fetch attachments from the XCResult bundle
+    fn fetch_attachments_step(&self, test_identifier_url: &str) -> Result<(), PipelineError> {
         println!("Step 1: Fetching attachments...");
         let attachment_handler = XCTestResultAttachmentHandler::new();
 
         match attachment_handler.fetch_attachments(
-            &detail.test_identifier_url,
+            test_identifier_url,
             &self.xcresult_path,
             &self.temp_dir,
         ) {
@@ -79,26 +74,44 @@ impl AutofixPipeline {
         }
 
         println!();
+        Ok(())
+    }
 
-        // Step 2: Locate the test file
+    /// Step 2: Locate the test file in the workspace
+    fn locate_test_file_step(&self, test_identifier_url: &str) -> Result<PathBuf, PipelineError> {
         println!("Step 2: Locating test file...");
         let file_locator = XCWorkspaceFileLocator::new(&self.workspace_path);
 
-        match file_locator.locate_file(&detail.test_identifier_url) {
+        match file_locator.locate_file(test_identifier_url) {
             Ok(file_path) => {
                 println!("✓ Test file located at: {}", file_path.display());
                 println!(
                     "  File URL: file://{}",
-                    file_path.canonicalize().unwrap_or(file_path).display()
+                    file_path
+                        .canonicalize()
+                        .unwrap_or_else(|_| file_path.clone())
+                        .display()
                 );
+                println!();
+                Ok(file_path)
             }
             Err(e) => {
                 println!("✗ Failed to locate file: {}", e);
-                return Err(e.into());
+                println!();
+                Err(e.into())
             }
         }
+    }
 
-        println!();
+    /// Run the autofix pipeline for a given test result detail
+    pub fn run(&self, detail: &XCTestResultDetail) -> Result<(), PipelineError> {
+        println!("\n========================================");
+        println!("Running Autofix Pipeline");
+        println!("========================================\n");
+
+        self.fetch_attachments_step(&detail.test_identifier_url)?;
+        self.locate_test_file_step(&detail.test_identifier_url)?;
+
         println!("========================================");
         println!("Pipeline completed");
         println!("========================================\n");
