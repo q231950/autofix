@@ -130,6 +130,7 @@ name = "autofix"
 version = "0.1.0"
 dependencies = [
  "anthropic-sdk-rust",
+ "base64",
  "clap",
  "serde",
  "serde_json",

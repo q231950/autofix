@@ -3,7 +3,10 @@ use crate::xc_test_result_attachment_handler::{
 };
 use crate::xc_workspace_file_locator::{FileLocatorError, XCWorkspaceFileLocator};
 use crate::xctestresultdetailparser::XCTestResultDetail;
-use anthropic_sdk::{Anthropic, ContentBlock, MessageCreateBuilder};
+use anthropic_sdk::{
+    Anthropic, ContentBlock, ContentBlockParam, MessageContent, MessageCreateBuilder,
+};
+use base64::Engine;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -107,23 +110,117 @@ impl AutofixPipeline {
         }
     }
 
+    /// Helper function to find the latest simulator snapshot image
+    fn find_latest_snapshot(&self) -> Option<PathBuf> {
+        let attachments_dir = self.temp_dir.join("attachments");
+        if !attachments_dir.exists() {
+            return None;
+        }
+
+        // Look for image files (png, jpg, jpeg)
+        let mut image_files: Vec<_> = fs::read_dir(&attachments_dir)
+            .ok()?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                let path = entry.path();
+                path.is_file()
+                    && path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg"))
+                        .unwrap_or(false)
+            })
+            .collect();
+
+        // Sort by modification time (newest first)
+        image_files.sort_by_key(|entry| {
+            entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|t| std::cmp::Reverse(t))
+        });
+
+        image_files.first().map(|entry| entry.path())
+    }
+
     /// Step 3: Perform autofix using Claude AI
-    async fn autofix_step(&self) -> Result<(), PipelineError> {
+    async fn autofix_step(
+        &self,
+        detail: &XCTestResultDetail,
+        test_file_path: &Path,
+    ) -> Result<(), PipelineError> {
         println!("Step 3: Running autofix with Claude AI...");
 
         // Create Anthropic client from environment
         let client =
             Anthropic::from_env().map_err(|e| PipelineError::AnthropicApiError(e.to_string()))?;
 
+        // Read the test file contents
+        let test_file_contents = fs::read_to_string(test_file_path)?;
+
+        // Find the latest simulator snapshot
+        let snapshot_path = self.find_latest_snapshot();
+
         // Create the prompt
-        let prompt = "Hi, I am autofix, a tool to automatically fix UI tests on iOS and Android. Who are you?";
+        let prompt = format!(
+            r#"I am analyzing a failed iOS UI test and need your help to find a possible solution.
+
+**Failed Test:** {}
+
+**Test File Contents:**
+```swift
+{}
+```
+
+{}
+
+Please analyze the failed test and the simulator snapshot (if available) to:
+1. Identify what might have caused the test to fail
+2. Suggest possible solutions or fixes to make the test pass
+3. Provide specific code changes if applicable
+
+Focus on common UI test issues like:
+- Element not found or timing issues
+- Incorrect selectors or accessibility identifiers
+- Race conditions or animations
+- UI state mismatches
+- Assertion failures"#,
+            detail.test_name,
+            test_file_contents,
+            if snapshot_path.is_some() {
+                "**Simulator Snapshot:** I've attached the latest simulator screenshot showing the state when the test failed."
+            } else {
+                "**Note:** No simulator snapshot was available for this test."
+            }
+        );
+
+        // Print the prompt
+        println!("Sending prompt to Claude:");
+        println!("─────────────────────────────────────────");
+        println!("{}", prompt);
+        println!("─────────────────────────────────────────");
+        println!();
+
+        // Build the message content with text and optionally an image
+        let mut content_blocks = vec![ContentBlockParam::text(&prompt)];
+
+        // Add the image if available
+        if let Some(img_path) = snapshot_path {
+            println!("Adding simulator snapshot: {}", img_path.display());
+            if let Ok(image_data) = fs::read(&img_path) {
+                // Convert image to base64
+                let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_data);
+                content_blocks.push(ContentBlockParam::image_base64("image/jpeg", &base64_image));
+            }
+        }
 
         // Create and send the message request
         let message = client
             .messages()
             .create(
-                MessageCreateBuilder::new("claude-3-5-sonnet-latest", 1024)
-                    .user(prompt)
+                MessageCreateBuilder::new("claude-3-5-sonnet-latest", 4096)
+                    .user(MessageContent::Blocks(content_blocks))
                     .build(),
             )
             .await;
@@ -137,7 +234,7 @@ impl AutofixPipeline {
                 // Extract and print the text from the response
                 for content in &response.content {
                     if let ContentBlock::Text { text } = content {
-                        println!("  {}", text);
+                        println!("{}", text);
                     }
                 }
                 println!();
@@ -158,8 +255,8 @@ impl AutofixPipeline {
         println!("========================================\n");
 
         self.fetch_attachments_step(&detail.test_identifier_url)?;
-        self.locate_test_file_step(&detail.test_identifier_url)?;
-        self.autofix_step().await?;
+        let test_file_path = self.locate_test_file_step(&detail.test_identifier_url)?;
+        self.autofix_step(detail, &test_file_path).await?;
 
         println!("========================================");
         println!("Pipeline completed");
