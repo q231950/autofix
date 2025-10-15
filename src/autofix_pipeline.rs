@@ -3,6 +3,7 @@ use crate::xc_test_result_attachment_handler::{
 };
 use crate::xc_workspace_file_locator::{FileLocatorError, XCWorkspaceFileLocator};
 use crate::xctestresultdetailparser::XCTestResultDetail;
+use anthropic_sdk::{Anthropic, ContentBlock, MessageCreateBuilder};
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -17,6 +18,9 @@ pub enum PipelineError {
 
     #[error("Failed to locate file: {0}")]
     FileLocatorError(#[from] FileLocatorError),
+
+    #[error("Anthropic API error: {0}")]
+    AnthropicApiError(String),
 }
 
 pub struct AutofixPipeline {
@@ -103,14 +107,59 @@ impl AutofixPipeline {
         }
     }
 
+    /// Step 3: Perform autofix using Claude AI
+    async fn autofix_step(&self) -> Result<(), PipelineError> {
+        println!("Step 3: Running autofix with Claude AI...");
+
+        // Create Anthropic client from environment
+        let client =
+            Anthropic::from_env().map_err(|e| PipelineError::AnthropicApiError(e.to_string()))?;
+
+        // Create the prompt
+        let prompt = "Hi, I am autofix, a tool to automatically fix UI tests on iOS and Android. Who are you?";
+
+        // Create and send the message request
+        let message = client
+            .messages()
+            .create(
+                MessageCreateBuilder::new("claude-3-5-sonnet-latest", 1024)
+                    .user(prompt)
+                    .build(),
+            )
+            .await;
+
+        // Handle the response
+        match message {
+            Ok(response) => {
+                println!("✓ Received response from Claude:");
+                println!();
+
+                // Extract and print the text from the response
+                for content in &response.content {
+                    if let ContentBlock::Text { text } = content {
+                        println!("  {}", text);
+                    }
+                }
+                println!();
+                Ok(())
+            }
+            Err(e) => {
+                println!("✗ Failed to get response from Claude: {}", e);
+                println!();
+                Err(PipelineError::AnthropicApiError(e.to_string()))
+            }
+        }
+    }
+
     /// Run the autofix pipeline for a given test result detail
-    pub fn run(&self, detail: &XCTestResultDetail) -> Result<(), PipelineError> {
+    pub async fn run(&self, detail: &XCTestResultDetail) -> Result<(), PipelineError> {
         println!("\n========================================");
         println!("Running Autofix Pipeline");
         println!("========================================\n");
 
         self.fetch_attachments_step(&detail.test_identifier_url)?;
         self.locate_test_file_step(&detail.test_identifier_url)?;
+        self.autofix_step().await?;
 
         println!("========================================");
         println!("Pipeline completed");

@@ -46,7 +46,8 @@ enum Commands {
     },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
 
     match args.command {
@@ -59,7 +60,7 @@ fn main() {
 
                 let cmd = TestCommand::new(test_result_path, workspace_path, test_id);
 
-                if let Err(e) = cmd.execute_ios() {
+                if let Err(e) = cmd.execute_ios().await {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -89,7 +90,7 @@ fn main() {
 
                 let cmd = AutofixCommand::new(test_result_path, workspace_path);
 
-                if let Err(e) = cmd.execute_ios() {
+                if let Err(e) = cmd.execute_ios().await {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }

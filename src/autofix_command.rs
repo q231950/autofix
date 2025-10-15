@@ -28,7 +28,7 @@ impl AutofixCommand {
     }
 
     /// Execute the autofix command for iOS
-    pub fn execute_ios(&self) -> Result<(), AutofixError> {
+    pub async fn execute_ios(&self) -> Result<(), AutofixError> {
         println!("Running autofix for iOS...");
         println!("Test result path: {}", self.test_result_path.display());
         println!("Workspace path: {}", self.workspace_path.display());
@@ -66,7 +66,7 @@ impl AutofixCommand {
                     failure.test_identifier_url.clone(),
                 );
 
-                test_cmd.execute_ios_silent()?;
+                test_cmd.execute_ios_silent().await?;
                 println!();
             }
         } else {
@@ -125,15 +125,15 @@ mod tests {
         assert_eq!(cmd.workspace_path, PathBuf::from("path/to/workspace"));
     }
 
-    #[test]
-    fn test_execute_ios_with_fixture() {
+    #[tokio::test]
+    async fn test_execute_ios_with_fixture() {
         let cmd = AutofixCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
         );
 
         // This will only work if the fixture exists
-        let result = cmd.execute_ios();
+        let result = cmd.execute_ios().await;
 
         // We don't assert success because the fixture might not exist
         // But we verify that if it fails, it's with an expected error

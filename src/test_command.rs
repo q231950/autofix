@@ -27,16 +27,16 @@ impl TestCommand {
     }
 
     /// Execute the test command for iOS
-    pub fn execute_ios(&self) -> Result<(), TestCommandError> {
-        self.execute_ios_internal(true)
+    pub async fn execute_ios(&self) -> Result<(), TestCommandError> {
+        self.execute_ios_internal(true).await
     }
 
     /// Execute the test command for iOS without printing (for use by autofix command)
-    pub fn execute_ios_silent(&self) -> Result<(), TestCommandError> {
-        self.execute_ios_internal(false)
+    pub async fn execute_ios_silent(&self) -> Result<(), TestCommandError> {
+        self.execute_ios_internal(false).await
     }
 
-    fn execute_ios_internal(&self, print_output: bool) -> Result<(), TestCommandError> {
+    async fn execute_ios_internal(&self, print_output: bool) -> Result<(), TestCommandError> {
         if print_output {
             println!("Fetching test details for iOS...");
             println!("Test result path: {}", self.test_result_path.display());
@@ -55,7 +55,7 @@ impl TestCommand {
 
         // Run the autofix pipeline
         let pipeline = AutofixPipeline::new(&self.test_result_path, &self.workspace_path)?;
-        pipeline.run(&detail)?;
+        pipeline.run(&detail).await?;
 
         Ok(())
     }
@@ -147,8 +147,8 @@ mod tests {
         assert_eq!(cmd.test_id, "test://example");
     }
 
-    #[test]
-    fn test_execute_ios_with_fixture() {
+    #[tokio::test]
+    async fn test_execute_ios_with_fixture() {
         let cmd = TestCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
@@ -156,7 +156,7 @@ mod tests {
         );
 
         // This will only work if the fixture exists
-        let result = cmd.execute_ios_silent();
+        let result = cmd.execute_ios_silent().await;
 
         // We don't assert success because the fixture might not exist
         // But we verify that if it fails, it's with an expected error
