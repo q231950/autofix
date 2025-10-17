@@ -1,4 +1,4 @@
-use crate::autofix_pipeline::{AutofixPipeline, PipelineError};
+use crate::pipeline::{AutofixPipeline, PipelineError};
 use crate::xctestresultdetailparser::{XCTestResultDetailParser, XCTestResultDetailParserError};
 use std::path::PathBuf;
 

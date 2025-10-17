@@ -1,5 +1,5 @@
 mod autofix_command;
-mod autofix_pipeline;
+mod pipeline;
 mod test_command;
 mod tools;
 mod xc_test_result_attachment_handler;
