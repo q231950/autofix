@@ -206,48 +206,8 @@ impl AutofixPipeline {
             }
         }
 
-        if self.knightrider_mode {
-            // Knight Rider mode: enable tool use
-            self.run_with_tools(client, content_blocks, detail).await
-        } else {
-            // Regular mode: just get analysis
-            self.run_without_tools(client, content_blocks).await
-        }
-    }
-
-    async fn run_without_tools(
-        &self,
-        client: Anthropic,
-        content_blocks: Vec<ContentBlockParam>,
-    ) -> Result<(), PipelineError> {
-        let message = client
-            .messages()
-            .create(
-                MessageCreateBuilder::new("claude-3-5-sonnet-latest", 4096)
-                    .user(MessageContent::Blocks(content_blocks))
-                    .build(),
-            )
-            .await;
-
-        match message {
-            Ok(response) => {
-                println!("✓ Received response from Claude:");
-                println!();
-
-                for content in &response.content {
-                    if let ContentBlock::Text { text } = content {
-                        println!("{}", text);
-                    }
-                }
-                println!();
-                Ok(())
-            }
-            Err(e) => {
-                println!("✗ Failed to get response from Claude: {}", e);
-                println!();
-                Err(PipelineError::AnthropicApiError(e.to_string()))
-            }
-        }
+        // Both modes use tools - the difference is in the prompt guidance
+        self.run_with_tools(client, content_blocks, detail).await
     }
 
     async fn run_with_tools(
