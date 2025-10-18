@@ -1,6 +1,9 @@
+use crate::xctestresultdetailparser::{XCTestResultDetail, XCTestResultDetailParser};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestRunnerTool {
@@ -21,6 +24,10 @@ pub struct TestRunnerResult {
     pub stdout: String,
     pub stderr: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_detail: Option<XCTestResultDetail>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub xcresult_path: Option<PathBuf>,
 }
 
 impl TestRunnerTool {
@@ -80,6 +87,8 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                 stdout: String::new(),
                 stderr: String::new(),
                 message: format!("Unknown operation: {}", input.operation),
+                test_detail: None,
+                xcresult_path: None,
             },
         }
     }
@@ -118,9 +127,30 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                     stdout: String::new(),
                     stderr: String::new(),
                     message: format!("Invalid test identifier format: {}", test_identifier),
+                    test_detail: None,
+                    xcresult_path: None,
                 };
             }
         };
+
+        // Create temporary directory for this build
+        let uuid = Uuid::new_v4();
+        let temp_base = workspace_root
+            .join(".autofix/test-runner-tool")
+            .join(uuid.to_string());
+        let build_dir = temp_base.join("build");
+
+        if let Err(e) = fs::create_dir_all(&build_dir) {
+            return TestRunnerResult {
+                success: false,
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: String::new(),
+                message: format!("Failed to create build directory: {}", e),
+                test_detail: None,
+                xcresult_path: None,
+            };
+        }
 
         let output = Command::new("xcodebuild")
             .arg("build")
@@ -128,6 +158,8 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
             .arg(&target)
             .arg("-destination")
             .arg("platform=iOS Simulator,name=iPhone 17 Pro")
+            .arg("-derivedDataPath")
+            .arg(&build_dir)
             .current_dir(workspace_root)
             .output();
 
@@ -151,6 +183,8 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                             target, exit_code
                         )
                     },
+                    test_detail: None,
+                    xcresult_path: None,
                 }
             }
             Err(e) => TestRunnerResult {
@@ -159,6 +193,8 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                 stdout: String::new(),
                 stderr: String::new(),
                 message: format!("Failed to execute xcodebuild: {}", e),
+                test_detail: None,
+                xcresult_path: None,
             },
         }
     }
@@ -173,9 +209,46 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                     stdout: String::new(),
                     stderr: String::new(),
                     message: format!("Invalid test identifier format: {}", test_identifier),
+                    test_detail: None,
+                    xcresult_path: None,
                 };
             }
         };
+
+        // Create temporary directories for this test run
+        let uuid = Uuid::new_v4();
+        let temp_base = workspace_root
+            .join(".autofix/test-runner-tool")
+            .join(uuid.to_string());
+        let build_dir = temp_base.join("build");
+        let test_dir = temp_base.join("test");
+
+        // Create directories
+        if let Err(e) = fs::create_dir_all(&build_dir) {
+            return TestRunnerResult {
+                success: false,
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: String::new(),
+                message: format!("Failed to create build directory: {}", e),
+                test_detail: None,
+                xcresult_path: None,
+            };
+        }
+
+        if let Err(e) = fs::create_dir_all(&test_dir) {
+            return TestRunnerResult {
+                success: false,
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: String::new(),
+                message: format!("Failed to create test directory: {}", e),
+                test_detail: None,
+                xcresult_path: None,
+            };
+        }
+
+        let result_bundle_path = test_dir.join("result.xcresult");
 
         let output = Command::new("xcodebuild")
             .arg("test")
@@ -184,6 +257,10 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
             .arg("-destination")
             .arg("platform=iOS Simulator,name=iPhone 17 Pro")
             .arg(format!("-only-testing:{}", full_test))
+            .arg("-derivedDataPath")
+            .arg(&build_dir)
+            .arg("-resultBundlePath")
+            .arg(&result_bundle_path)
             .current_dir(workspace_root)
             .output();
 
@@ -193,6 +270,27 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let exit_code = output.status.code().unwrap_or(-1);
                 let success = output.status.success();
+
+                // If test failed, parse the xcresult to get detailed failure information
+                let (test_detail, xcresult_path) = if !success && result_bundle_path.exists() {
+                    let parser = XCTestResultDetailParser::new();
+                    match parser.parse(&result_bundle_path, test_identifier) {
+                        Ok(detail) => (Some(detail), Some(result_bundle_path.clone())),
+                        Err(e) => {
+                            eprintln!("Failed to parse xcresult: {}", e);
+                            (None, Some(result_bundle_path.clone()))
+                        }
+                    }
+                } else {
+                    (
+                        None,
+                        if result_bundle_path.exists() {
+                            Some(result_bundle_path.clone())
+                        } else {
+                            None
+                        },
+                    )
+                };
 
                 TestRunnerResult {
                     success,
@@ -204,6 +302,8 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                     } else {
                         format!("Test failed: {} (exit code: {})", full_test, exit_code)
                     },
+                    test_detail,
+                    xcresult_path,
                 }
             }
             Err(e) => TestRunnerResult {
@@ -212,6 +312,8 @@ Returns exit code, stdout, stderr, and success status."#.to_string(),
                 stdout: String::new(),
                 stderr: String::new(),
                 message: format!("Failed to execute xcodebuild: {}", e),
+                test_detail: None,
+                xcresult_path: None,
             },
         }
     }

@@ -349,6 +349,13 @@ impl AutofixPipeline {
                             );
                             if result.success {
                                 println!("   ✅ SUCCESS!");
+                            } else if let Some(ref detail) = result.test_detail {
+                                println!("   ❌ Test failed: {}", detail.test_name);
+                                println!("   📊 Result: {}", detail.test_result);
+                                println!(
+                                    "   📸 New snapshot available at: {:?}",
+                                    result.xcresult_path
+                                );
                             }
                             serde_json::to_value(&result).unwrap()
                         }
