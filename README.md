@@ -277,7 +277,7 @@ Contributions welcome! Please:
 
 ## 📄 License
 
-[Add your license here]
+[GPL-3.0](LICENSE)
 
 ## 🙏 Acknowledgments
 
