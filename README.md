@@ -39,6 +39,30 @@ Set your Anthropic API key:
 export ANTHROPIC_API_KEY="your-api-key-here"
 ```
 
+#### Optional: Rate Limiting Configuration
+
+Autofix includes smart rate limiting to prevent hitting Anthropic's API limits. Configure these environment variables:
+
+```bash
+# Maximum input tokens per minute (default: 50000)
+export ANTHROPIC_RATE_LIMIT_TPM=50000
+
+# Enable/disable rate limiting (default: true)
+export ANTHROPIC_RATE_LIMIT_ENABLED=true
+```
+
+**How it works:**
+- Autofix estimates token usage before each API request
+- If the request would exceed your per-minute limit, it automatically waits
+- The tool displays a message when waiting: `⏸️ Rate limit approaching. Waiting X seconds...`
+- Adjust `ANTHROPIC_RATE_LIMIT_TPM` based on your API tier:
+  - Free tier: Lower limits (check Anthropic docs)
+  - Claude Sonnet 4.x: 30,000 tokens/minute (default tier)
+  - Claude Haiku 3.5: 50,000 tokens/minute
+  - Higher tiers: Increase as needed
+
+**Tip:** Set `ANTHROPIC_RATE_LIMIT_ENABLED=false` to disable rate limiting entirely if you have unlimited access or want to handle rate limits manually.
+
 ## 🚀 Usage
 
 ### Standard Mode (Fix Test Code)

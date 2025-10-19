@@ -65,16 +65,19 @@ Use this full identifier when calling test_runner."#,
     )
 }
 
-/// Generate the prompt for standard mode (analysis and suggestions)
+/// Generate the prompt for standard mode (fix test code, optionally add accessibility to app)
 pub fn generate_standard_prompt(
     detail: &XCTestResultDetail,
     test_file_contents: &str,
+    workspace_path: &Path,
     has_snapshot: bool,
 ) -> String {
     format!(
-        r#"I am analyzing a failed iOS UI test and need your help to find a possible solution.
+        r#"I am analyzing a failed iOS UI test and need you to AUTOMATICALLY FIX IT using the provided tools.
 
 **Failed Test:** {}
+**Test Identifier:** {}
+**Workspace Path:** {}
 
 **Test File Contents:**
 ```swift
@@ -84,29 +87,50 @@ pub fn generate_standard_prompt(
 {}
 
 ASSUMPTION: THE APPLICATION CODE IS CORRECT
-- The application is working as intended
-- The test code may need to be adjusted to match the actual application behavior
-- You may need to suggest adding accessibility identifiers to the app code to help the test locate elements
+- The application is working as intended and should generally NOT be modified
+- The test code needs to be adjusted to match the actual application behavior
+- You may add accessibility identifiers to the app code ONLY if necessary for test discoverability
 
-Please analyze the failed test and the simulator snapshot (if available) to:
-1. Identify what might have caused the test to fail
-2. Suggest fixes to the TEST CODE to make it pass
-3. If elements can't be found, suggest adding accessibility identifiers to the APP CODE
-4. Provide specific code changes for both test adjustments and accessibility improvements
+YOUR TASK: Use the available tools to automatically fix the TEST CODE. You should:
 
-Focus on common UI test issues and solutions:
-- **Element not found**: Suggest correct selectors or accessibility identifiers to add to app code
-- **Timing issues**: Suggest adding proper waits or expectations to test code
-- **Incorrect selectors**: Provide corrected XCUIElement queries in test code
-- **Race conditions**: Suggest test code improvements for handling animations/transitions
-- **Assertion failures**: Suggest adjusting test expectations or fixing test logic
-- **Missing accessibility**: Suggest adding `.accessibilityIdentifier()` to app's SwiftUI views or setting `accessibilityIdentifier` on UIKit elements"#,
+1. Use `directory_inspector` to explore the codebase and locate the test file
+2. Use `directory_inspector` to read the test file and understand the test logic
+3. Analyze the test to understand what it's trying to do
+4. Identify what's wrong with the TEST CODE
+5. Use `code_editor` to make necessary changes to the TEST FILE
+6. If elements cannot be found, use `directory_inspector` to find the relevant app code
+7. If needed, use `code_editor` to add accessibility identifiers to APP CODE (minimal changes only)
+8. Use `test_runner` with operation "build" to verify your changes compile
+9. Use `test_runner` with operation "test" to verify the test now passes
+
+IMPORTANT INSTRUCTIONS:
+- Primary focus: Fix the TEST code to work with the current app
+- Only modify APP code if you need to add accessibility identifiers for element discovery
+- Make targeted, minimal changes to fix the specific test failure
+- After each code change, build and test to verify
+- If the first fix doesn't work, iterate and try different approaches
+- Common fixes needed in test code:
+  * Update selectors to match actual UI elements
+  * Add proper waits/expectations for async operations
+  * Fix incorrect assertions or expectations
+  * Update element queries to use correct identifiers
+  * Handle animations and transitions properly
+- If adding accessibility to app:
+  * Use `.accessibilityIdentifier("...")` in SwiftUI
+  * Use `element.accessibilityIdentifier = "..."` in UIKit
+  * Keep identifier names clear and test-friendly
+
+The test identifier format is: {}
+Use this full identifier when calling test_runner."#,
         detail.test_name,
+        detail.test_identifier_url,
+        workspace_path.display(),
         test_file_contents,
         if has_snapshot {
             "**Simulator Snapshot:** I've attached the latest simulator screenshot showing the state when the test failed."
         } else {
             "**Note:** No simulator snapshot was available for this test."
-        }
+        },
+        detail.test_identifier_url
     )
 }

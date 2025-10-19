@@ -1,4 +1,5 @@
 use super::prompts;
+use crate::rate_limiter::RateLimiter;
 use crate::tools::{
     CodeEditorInput, CodeEditorTool, DirectoryInspectorInput, DirectoryInspectorTool,
     TestRunnerInput, TestRunnerTool,
@@ -14,6 +15,7 @@ use anthropic_sdk::{
 use base64::Engine;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +38,7 @@ pub struct AutofixPipeline {
     workspace_path: PathBuf,
     temp_dir: PathBuf,
     knightrider_mode: bool,
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl AutofixPipeline {
@@ -56,11 +59,15 @@ impl AutofixPipeline {
 
         println!("Created temporary directory: {}", temp_dir.display());
 
+        // Create rate limiter from environment variables
+        let rate_limiter = Arc::new(RateLimiter::from_env());
+
         Ok(Self {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
             workspace_path: workspace_path.as_ref().to_path_buf(),
             temp_dir,
             knightrider_mode,
+            rate_limiter,
         })
     }
 
@@ -183,7 +190,12 @@ impl AutofixPipeline {
                 has_snapshot,
             )
         } else {
-            prompts::generate_standard_prompt(detail, &test_file_contents, has_snapshot)
+            prompts::generate_standard_prompt(
+                detail,
+                &test_file_contents,
+                &self.workspace_path,
+                has_snapshot,
+            )
         };
 
         // Print the prompt
@@ -272,6 +284,20 @@ impl AutofixPipeline {
             // Add tools
             builder = builder.tools(tools.clone());
 
+            // Estimate token count for rate limiting
+            // Rough estimation: ~4 chars per token, plus conversation history
+            let estimated_tokens =
+                self.estimate_request_tokens(&conversation_history, &current_user_content);
+
+            // Check rate limit and wait if necessary
+            if let Err(wait_duration) = self.rate_limiter.check_and_wait(estimated_tokens) {
+                println!(
+                    "⏸️  Rate limit approaching. Waiting {} seconds before next request...",
+                    wait_duration.as_secs()
+                );
+                tokio::time::sleep(wait_duration).await;
+            }
+
             let message = client.messages().create(builder.build()).await;
 
             let response = match message {
@@ -281,6 +307,11 @@ impl AutofixPipeline {
                     return Err(PipelineError::AnthropicApiError(e.to_string()));
                 }
             };
+
+            // Record actual token usage (estimate from response if usage not available)
+            // Note: The Rust SDK may not expose usage stats, so we estimate
+            let actual_tokens = estimated_tokens; // Could extract from response headers if available
+            self.rate_limiter.record_usage(actual_tokens);
 
             // Check stop reason
             let has_tool_use = response
@@ -384,6 +415,54 @@ impl AutofixPipeline {
 
         println!("\n⚠️ Maximum iterations reached");
         Ok(())
+    }
+
+    /// Estimate the number of tokens in a request
+    /// Uses a simple heuristic: ~4 characters per token
+    fn estimate_request_tokens(
+        &self,
+        conversation_history: &[(Vec<ContentBlockParam>, Vec<ContentBlock>)],
+        current_content: &[ContentBlockParam],
+    ) -> usize {
+        let mut char_count = 0;
+
+        // Count characters in conversation history
+        for (user_blocks, assistant_blocks) in conversation_history {
+            char_count += self.estimate_content_param_chars(user_blocks);
+            char_count += self.estimate_content_block_chars(assistant_blocks);
+        }
+
+        // Count characters in current content
+        char_count += self.estimate_content_param_chars(current_content);
+
+        // Convert to token estimate (rough: 1 token ≈ 4 chars)
+        // Add 20% buffer for safety
+        let estimated_tokens = (char_count / 4) * 12 / 10;
+
+        estimated_tokens
+    }
+
+    fn estimate_content_param_chars(&self, blocks: &[ContentBlockParam]) -> usize {
+        blocks
+            .iter()
+            .map(|block| match block {
+                ContentBlockParam::Text { text } => text.len(),
+                ContentBlockParam::ToolResult { content, .. } => {
+                    content.as_ref().map(|s| s.len()).unwrap_or(0)
+                }
+                _ => 100, // Rough estimate for other types
+            })
+            .sum()
+    }
+
+    fn estimate_content_block_chars(&self, blocks: &[ContentBlock]) -> usize {
+        blocks
+            .iter()
+            .map(|block| match block {
+                ContentBlock::Text { text } => text.len(),
+                _ => 100, // Rough estimate for other types
+            })
+            .sum()
     }
 
     /// Run the autofix pipeline for a given test result detail
