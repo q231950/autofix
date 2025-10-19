@@ -34,14 +34,13 @@ YOUR TASK: Use the available tools to automatically fix the APPLICATION CODE. Yo
 3. Analyze the test to understand what it expects from the application
 4. Identify what's missing or incorrect in the APPLICATION CODE
 5. Use `code_editor` to make necessary changes to APPLICATION SOURCE CODE ONLY
-6. Use `test_runner` with operation "build" to verify your changes compile
-7. Use `test_runner` with operation "test" to verify the test now passes
+6. Use `test_runner` with operation "test" to verify the test now passes
 
 IMPORTANT INSTRUCTIONS:
 - DO NOT modify any test files - only modify application source code
 - You MUST use the tools to make actual changes to the application code
 - Make targeted, minimal changes to fix the specific test failure
-- After each code change, build and test to verify
+- After each code change, test to verify (testing also compiles the code)
 - If the first fix doesn't work, iterate and try different approaches
 - Common fixes needed in app code:
   * Add missing UI elements that the test expects
@@ -100,14 +99,13 @@ YOUR TASK: Use the available tools to automatically fix the TEST CODE. You shoul
 5. Use `code_editor` to make necessary changes to the TEST FILE
 6. If elements cannot be found, use `directory_inspector` to find the relevant app code
 7. If needed, use `code_editor` to add accessibility identifiers to APP CODE (minimal changes only)
-8. Use `test_runner` with operation "build" to verify your changes compile
-9. Use `test_runner` with operation "test" to verify the test now passes
+8. Use `test_runner` with operation "test" to verify the test now passes
 
 IMPORTANT INSTRUCTIONS:
 - Primary focus: Fix the TEST code to work with the current app
 - Only modify APP code if you need to add accessibility identifiers for element discovery
 - Make targeted, minimal changes to fix the specific test failure
-- After each code change, build and test to verify
+- After each code change, test to verify (testing also compiles the code)
 - If the first fix doesn't work, iterate and try different approaches
 - Common fixes needed in test code:
   * Update selectors to match actual UI elements
