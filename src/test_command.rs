@@ -153,6 +153,7 @@ mod tests {
             PathBuf::from("path/to/workspace"),
             "test://example".to_string(),
             false,
+            false,
         );
 
         assert_eq!(
@@ -169,6 +170,7 @@ mod tests {
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             "test://com.apple.xcode/AutoFixSampler/AutoFixSamplerUITests/AutoFixSamplerUITests/testExample".to_string(),
+            false,
             false,
         );
 

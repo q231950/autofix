@@ -263,14 +263,16 @@ impl AutofixPipeline {
         }
 
         // Both modes use tools - the difference is in the prompt guidance
-        self.run_with_tools(client, content_blocks, detail).await
+        self.run_with_tools(client, content_blocks, detail, test_file_path)
+            .await
     }
 
     async fn run_with_tools(
         &self,
         client: Anthropic,
         initial_content: Vec<ContentBlockParam>,
-        _detail: &XCTestResultDetail,
+        detail: &XCTestResultDetail,
+        test_file_path: &Path,
     ) -> Result<(), PipelineError> {
         // Create tool instances
         let dir_tool = DirectoryInspectorTool::new();
@@ -288,9 +290,11 @@ impl AutofixPipeline {
         let mut conversation_history: Vec<(Vec<ContentBlockParam>, Vec<ContentBlock>)> = vec![];
         let mut current_user_content = initial_content;
         let max_iterations = 20; // Prevent infinite loops
+        #[allow(unused_assignments)]
+        let mut test_failed_in_last_iteration = false;
 
         for iteration in 0..max_iterations {
-            println!("\n🤖 Knight Rider iteration {}...", iteration + 1);
+            println!("\n🤖 autofix iteration {}...", iteration + 1);
 
             // Build the message with full conversation history
             let mut builder = MessageCreateBuilder::new("claude-3-5-haiku-latest", 1024);
@@ -344,11 +348,24 @@ impl AutofixPipeline {
 
             // Check rate limit and wait if necessary
             if let Err(wait_duration) = self.rate_limiter.check_and_wait(estimated_tokens) {
+                let wait_secs = wait_duration.as_secs();
                 println!(
-                    "⏸️  Rate limit approaching. Waiting {} seconds before next request...",
-                    wait_duration.as_secs()
+                    "\n⏸️  Rate limit approaching. Waiting {} seconds before next request...",
+                    wait_secs
                 );
-                tokio::time::sleep(wait_duration).await;
+
+                // Animated countdown
+                for remaining in (1..=wait_secs).rev() {
+                    print!(
+                        "\r⏳ Waiting: {} second{}...   ",
+                        remaining,
+                        if remaining == 1 { "" } else { "s" }
+                    );
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+                print!("\r✓ Rate limit window reset - continuing...                    \n");
+                std::io::Write::flush(&mut std::io::stdout()).ok();
             }
 
             let message = client.messages().create(builder.build()).await;
@@ -361,10 +378,21 @@ impl AutofixPipeline {
                 }
             };
 
-            // Record actual token usage (estimate from response if usage not available)
-            // Note: The Rust SDK may not expose usage stats, so we estimate
-            let actual_tokens = estimated_tokens; // Could extract from response headers if available
-            self.rate_limiter.record_usage(actual_tokens);
+            // Record actual token usage from the API response
+            let actual_input_tokens = response.usage.input_tokens as usize;
+            self.rate_limiter.record_usage(actual_input_tokens);
+
+            if self.verbose {
+                println!(
+                    "  [DEBUG] Actual input tokens used: {}",
+                    actual_input_tokens
+                );
+                println!(
+                    "  [DEBUG] Estimated was: {}, difference: {}",
+                    estimated_tokens,
+                    (actual_input_tokens as i64 - estimated_tokens as i64).abs()
+                );
+            }
 
             // Check stop reason
             let has_tool_use = response
@@ -388,13 +416,15 @@ impl AutofixPipeline {
 
             if gave_up || !has_tool_use {
                 if !gave_up {
-                    println!("\n✓ Knight Rider finished!");
+                    println!("\n✓ autofix finished!");
                 }
                 return Ok(());
             }
 
             // Execute tool calls
             let mut tool_results = Vec::new();
+            test_failed_in_last_iteration = false; // Reset for this iteration
+
             for content in &response.content {
                 if let ContentBlock::ToolUse { id, name, input } = content {
                     println!("\n🔧 Tool call: {} (id: {})", name, id);
@@ -483,13 +513,31 @@ impl AutofixPipeline {
                             );
                             if result.success {
                                 println!("   ✅ SUCCESS!");
-                            } else if let Some(ref detail) = result.test_detail {
-                                println!("   ❌ Test failed: {}", detail.test_name);
-                                println!("   📊 Result: {}", detail.test_result);
-                                println!(
-                                    "   📸 New snapshot available at: {:?}",
-                                    result.xcresult_path
-                                );
+                            } else {
+                                test_failed_in_last_iteration = true;
+
+                                if let Some(ref test_detail) = result.test_detail {
+                                    println!("   ❌ Test failed: {}", test_detail.test_name);
+                                    println!("   📊 Result: {}", test_detail.test_result);
+                                    println!(
+                                        "   📸 New snapshot available at: {:?}",
+                                        result.xcresult_path
+                                    );
+
+                                    // Store xcresult path for extracting new snapshot in next iteration
+                                    if let Some(ref xcresult_path) = result.xcresult_path {
+                                        if self.verbose {
+                                            println!(
+                                                "   [DEBUG] Saving xcresult path for next iteration"
+                                            );
+                                        }
+                                        // Extract and save the new snapshot
+                                        self.extract_latest_snapshot_from_xcresult(
+                                            xcresult_path,
+                                            &detail.test_identifier_url,
+                                        )?;
+                                    }
+                                }
                             }
 
                             if self.verbose {
@@ -516,6 +564,45 @@ impl AutofixPipeline {
             // Update current_user_content to be the tool results for the next iteration
             if !tool_results.is_empty() {
                 current_user_content = tool_results;
+
+                // If test failed in last iteration, inject updated context for next iteration
+                if test_failed_in_last_iteration {
+                    if self.verbose {
+                        println!(
+                            "\n  [DEBUG] Test failed - preparing updated context for next iteration"
+                        );
+                    }
+
+                    // Re-read the test file (it may have been edited)
+                    if let Ok(updated_test_content) = fs::read_to_string(test_file_path) {
+                        // Find the latest snapshot
+                        if let Some(snapshot_path) = self.find_latest_snapshot() {
+                            println!("\n📋 Providing updated context for next iteration:");
+                            println!("   • Updated test file content");
+                            println!("   • Latest failure snapshot");
+
+                            // Add updated test file content as a text message
+                            let context_message = format!(
+                                "UPDATED CONTEXT after test failure:\n\n\
+                                The test file may have been modified. Here's the current content:\n\n\
+                                ```swift\n{}\n```\n\n\
+                                A new snapshot from the failed test run is attached below showing the current UI state.",
+                                updated_test_content
+                            );
+                            current_user_content.push(ContentBlockParam::text(&context_message));
+
+                            // Add the new snapshot image
+                            if let Ok(image_data) = fs::read(&snapshot_path) {
+                                let base64_image =
+                                    base64::engine::general_purpose::STANDARD.encode(&image_data);
+                                current_user_content.push(ContentBlockParam::image_base64(
+                                    "image/jpeg",
+                                    &base64_image,
+                                ));
+                            }
+                        }
+                    }
+                }
             } else {
                 // No tool results but Claude didn't finish - shouldn't happen but handle it
                 break;
@@ -524,6 +611,41 @@ impl AutofixPipeline {
 
         println!("\n⚠️ Maximum iterations reached");
         Ok(())
+    }
+
+    /// Extract the latest snapshot from an xcresult bundle
+    fn extract_latest_snapshot_from_xcresult(
+        &self,
+        xcresult_path: &Path,
+        test_id: &str,
+    ) -> Result<(), PipelineError> {
+        let attachment_handler = XCTestResultAttachmentHandler::new();
+
+        if self.verbose {
+            println!(
+                "  [DEBUG] Extracting attachments from: {}",
+                xcresult_path.display()
+            );
+        }
+
+        match attachment_handler.fetch_attachments(test_id, xcresult_path, &self.temp_dir) {
+            Ok(attachments_dir) => {
+                if self.verbose {
+                    println!(
+                        "  [DEBUG] Attachments extracted to: {}",
+                        attachments_dir.display()
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if self.verbose {
+                    println!("  [DEBUG] Failed to extract attachments: {}", e);
+                }
+                // Don't fail the entire pipeline if we can't extract attachments
+                Ok(())
+            }
+        }
     }
 
     /// Handle Claude giving up by parsing the message and opening Xcode
@@ -673,8 +795,12 @@ mod tests {
 
     #[test]
     fn test_pipeline_creation() {
-        let pipeline =
-            AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace", false);
+        let pipeline = AutofixPipeline::new(
+            "tests/fixtures/sample.xcresult",
+            "path/to/workspace",
+            false,
+            false,
+        );
 
         assert!(pipeline.is_ok());
         let pipeline = pipeline.unwrap();
@@ -689,9 +815,13 @@ mod tests {
 
     #[test]
     fn test_pipeline_temp_dir_has_uuid() {
-        let pipeline =
-            AutofixPipeline::new("tests/fixtures/sample.xcresult", "path/to/workspace", false)
-                .unwrap();
+        let pipeline = AutofixPipeline::new(
+            "tests/fixtures/sample.xcresult",
+            "path/to/workspace",
+            false,
+            false,
+        )
+        .unwrap();
 
         let dir_name = pipeline.temp_dir.file_name().unwrap().to_string_lossy();
 
