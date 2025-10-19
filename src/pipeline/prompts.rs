@@ -112,13 +112,46 @@ IMPORTANT INSTRUCTIONS:
 - Common fixes needed in test code:
   * Update selectors to match actual UI elements
   * Add proper waits/expectations for async operations
-  * Fix incorrect assertions or expectations
+  * Update assertion VALUES to match current app (e.g., "Login" → "Sign In")
   * Update element queries to use correct identifiers
   * Handle animations and transitions properly
+- When to update assertions:
+  * App copy/text changed: Update expected strings
+  * UI reorganization: Update expected element counts or positions
+  * Design changes: Update expected properties (labels, button text, etc.)
+  * ALWAYS explain what changed and why the assertion was updated
 - If adding accessibility to app:
   * Use `.accessibilityIdentifier("...")` in SwiftUI
   * Use `element.accessibilityIdentifier = "..."` in UIKit
   * Keep identifier names clear and test-friendly
+
+CRITICAL RULES ABOUT TEST ASSERTIONS:
+- NEVER delete or comment out test assertions (XCTAssert*, XCTFail, etc.)
+- NEVER remove test expectations or verification code
+- You MAY update assertion values to match the current app behavior
+- Assertions validate important app behavior - they must remain active
+- Common assertion updates needed:
+  * Update expected text/labels if app copy changed (e.g., "Login" → "Sign In")
+  * Update expected counts if UI elements were reorganized
+  * Update expected properties if design changed (e.g., button placement)
+- If an assertion needs to be updated, make the change and explain why
+- The assertion itself must stay - only the expected VALUES can change
+
+GIVE UP POLICY:
+- If you attempt to fix the test/app code 2 times and the assertion still fails in unexpected ways
+- STOP and provide a final message with this exact format:
+
+  GIVING UP: Unable to fix assertion failure after 2 attempts
+  Failed assertion: [exact line of code from test file]
+  File: [absolute file path starting from workspace]
+  Line: [line number]
+  Reason: [brief explanation of what you tried]
+
+- Provide the FULL absolute path to the test file (e.g., {}/path/to/TestFile.swift)
+- Provide the exact LINE NUMBER where the assertion appears
+- This will automatically open Xcode at the failing assertion for manual review
+- DO NOT make any more code changes after giving up
+- DO NOT try alternative approaches beyond the 2 attempts
 
 The test identifier format is: {}
 Use this full identifier when calling test_runner."#,
@@ -131,6 +164,7 @@ Use this full identifier when calling test_runner."#,
         } else {
             "**Note:** No simulator snapshot was available for this test."
         },
+        workspace_path.display(),
         detail.test_identifier_url
     )
 }

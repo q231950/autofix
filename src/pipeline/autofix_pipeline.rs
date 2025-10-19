@@ -319,15 +319,24 @@ impl AutofixPipeline {
                 .iter()
                 .any(|c| matches!(c, ContentBlock::ToolUse { .. }));
 
-            // Print text responses
+            // Print text responses and check for give-up message
+            let mut gave_up = false;
             for content in &response.content {
                 if let ContentBlock::Text { text } = content {
                     println!("\n💭 Claude says:\n{}\n", text);
+
+                    // Check if Claude is giving up
+                    if text.contains("GIVING UP:") {
+                        gave_up = true;
+                        self.handle_give_up(text);
+                    }
                 }
             }
 
-            if !has_tool_use {
-                println!("\n✓ Knight Rider finished!");
+            if gave_up || !has_tool_use {
+                if !gave_up {
+                    println!("\n✓ Knight Rider finished!");
+                }
                 return Ok(());
             }
 
@@ -415,6 +424,62 @@ impl AutofixPipeline {
 
         println!("\n⚠️ Maximum iterations reached");
         Ok(())
+    }
+
+    /// Handle Claude giving up by parsing the message and opening Xcode
+    fn handle_give_up(&self, text: &str) {
+        println!("\n❌ Claude has given up after multiple attempts\n");
+
+        // Try to parse the file path and line number from the message
+        // Expected format:
+        // File: /absolute/path/to/File.swift
+        // Line: 42
+
+        let mut file_path: Option<String> = None;
+        let mut line_number: Option<u32> = None;
+
+        for line in text.lines() {
+            let line = line.trim();
+
+            if line.starts_with("File:") {
+                file_path = Some(line.trim_start_matches("File:").trim().to_string());
+            } else if line.starts_with("Line:") {
+                if let Ok(num) = line.trim_start_matches("Line:").trim().parse::<u32>() {
+                    line_number = Some(num);
+                }
+            }
+        }
+
+        // Generate Xcode deep link if we have both file and line
+        if let (Some(file), Some(line)) = (file_path, line_number) {
+            let xcode_url = format!("xed://open?file={}&line={}", file, line);
+
+            println!("┌─────────────────────────────────────────────────────────────");
+            println!("│ 🚀 Opening Xcode at the failing assertion...");
+            println!("│");
+            println!("│ File: {}", file);
+            println!("│ Line: {}", line);
+            println!("└─────────────────────────────────────────────────────────────\n");
+
+            // Try to open Xcode using the 'open' command on macOS
+            if cfg!(target_os = "macos") {
+                match std::process::Command::new("open").arg(&xcode_url).output() {
+                    Ok(_) => {
+                        println!("✓ Xcode should now be opening at the failing line\n");
+                    }
+                    Err(e) => {
+                        println!("⚠️  Could not automatically open Xcode: {}", e);
+                        println!("   Copy and paste this URL to open manually:");
+                        println!("   {}\n", xcode_url);
+                    }
+                }
+            } else {
+                println!("ℹ️  Xcode deep link (macOS only):");
+                println!("   {}\n", xcode_url);
+            }
+        } else {
+            println!("⚠️  Could not parse file location from give-up message\n");
+        }
     }
 
     /// Estimate the number of tokens in a request
