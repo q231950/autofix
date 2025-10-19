@@ -75,6 +75,15 @@ autofix --ios \
   --workspace path/to/workspace
 ```
 
+**With verbose debug output:**
+
+```bash
+autofix --ios \
+  --test-result path/to/test.xcresult \
+  --workspace path/to/workspace \
+  --verbose
+```
+
 **What it does:**
 - ✅ Analyzes test failures
 - ✅ Fixes test code (selectors, waits, expectations)
@@ -97,6 +106,27 @@ autofix --ios \
 - ✅ Fixes application source code only
 - ✅ Adds missing UI elements, labels, identifiers
 - ✅ Never modifies test files
+
+### Verbose Mode
+
+Add the `-v` or `--verbose` flag to any command to enable detailed debug output:
+
+```bash
+autofix --ios \
+  --test-result path/to/test.xcresult \
+  --workspace path/to/workspace \
+  --verbose  # or -v
+```
+
+**What verbose mode shows:**
+- File paths and directories being processed
+- Test identifiers and metadata
+- Tool execution details (operations, inputs, outputs)
+- Token usage and rate limit statistics
+- File sizes and content lengths
+- Success/failure details for each operation
+
+**Note:** AI conversation output is ALWAYS printed, regardless of verbose mode.
 
 ### Test a Specific Test
 

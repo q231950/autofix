@@ -38,6 +38,7 @@ pub struct AutofixPipeline {
     workspace_path: PathBuf,
     temp_dir: PathBuf,
     knightrider_mode: bool,
+    verbose: bool,
     rate_limiter: Arc<RateLimiter>,
 }
 
@@ -47,6 +48,7 @@ impl AutofixPipeline {
         xcresult_path: P,
         workspace_path: P,
         knightrider_mode: bool,
+        verbose: bool,
     ) -> Result<Self, PipelineError> {
         // Create .autofix/tmp directory in current directory
         let base_dir = PathBuf::from(".autofix/tmp");
@@ -67,6 +69,7 @@ impl AutofixPipeline {
             workspace_path: workspace_path.as_ref().to_path_buf(),
             temp_dir,
             knightrider_mode,
+            verbose,
             rate_limiter,
         })
     }
@@ -74,6 +77,13 @@ impl AutofixPipeline {
     /// Step 1: Fetch attachments from the XCResult bundle
     fn fetch_attachments_step(&self, test_identifier_url: &str) -> Result<(), PipelineError> {
         println!("Step 1: Fetching attachments...");
+
+        if self.verbose {
+            println!("  [DEBUG] XCResult path: {}", self.xcresult_path.display());
+            println!("  [DEBUG] Temp directory: {}", self.temp_dir.display());
+            println!("  [DEBUG] Test ID: {}", test_identifier_url);
+        }
+
         let attachment_handler = XCTestResultAttachmentHandler::new();
 
         match attachment_handler.fetch_attachments(
@@ -105,6 +115,15 @@ impl AutofixPipeline {
     /// Step 2: Locate the test file in the workspace
     fn locate_test_file_step(&self, test_identifier_url: &str) -> Result<PathBuf, PipelineError> {
         println!("Step 2: Locating test file...");
+
+        if self.verbose {
+            println!(
+                "  [DEBUG] Workspace path: {}",
+                self.workspace_path.display()
+            );
+            println!("  [DEBUG] Test identifier URL: {}", test_identifier_url);
+        }
+
         let file_locator = XCWorkspaceFileLocator::new(&self.workspace_path);
 
         match file_locator.locate_file(test_identifier_url) {
@@ -170,12 +189,32 @@ impl AutofixPipeline {
     ) -> Result<(), PipelineError> {
         println!("Step 3: Running autofix with Claude AI...");
 
+        if self.verbose {
+            println!(
+                "  [DEBUG] Mode: {}",
+                if self.knightrider_mode {
+                    "Knight Rider"
+                } else {
+                    "Standard"
+                }
+            );
+            println!("  [DEBUG] Test file path: {}", test_file_path.display());
+            println!("  [DEBUG] Test name: {}", detail.test_name);
+        }
+
         // Create Anthropic client from environment
         let client =
             Anthropic::from_env().map_err(|e| PipelineError::AnthropicApiError(e.to_string()))?;
 
         // Read the test file contents
         let test_file_contents = fs::read_to_string(test_file_path)?;
+
+        if self.verbose {
+            println!(
+                "  [DEBUG] Test file size: {} bytes",
+                test_file_contents.len()
+            );
+        }
 
         // Find the latest simulator snapshot
         let snapshot_path = self.find_latest_snapshot();
@@ -289,6 +328,15 @@ impl AutofixPipeline {
             let estimated_tokens =
                 self.estimate_request_tokens(&conversation_history, &current_user_content);
 
+            if self.verbose {
+                println!("  [DEBUG] Estimated input tokens: {}", estimated_tokens);
+                let (used, remaining, reset_in) = self.rate_limiter.get_stats();
+                println!(
+                    "  [DEBUG] Rate limit - Used: {}, Remaining: {}, Reset in: {}s",
+                    used, remaining, reset_in
+                );
+            }
+
             // Check rate limit and wait if necessary
             if let Err(wait_duration) = self.rate_limiter.check_and_wait(estimated_tokens) {
                 println!(
@@ -359,7 +407,21 @@ impl AutofixPipeline {
                                         e
                                     ))
                                 })?;
+
+                            if self.verbose {
+                                println!("   [DEBUG] Operation: {}", tool_input.operation);
+                                println!("   [DEBUG] Path: {}", tool_input.path);
+                            }
+
                             let result = dir_tool.execute(tool_input, &self.workspace_path);
+
+                            if self.verbose {
+                                println!(
+                                    "   [DEBUG] Result: {}",
+                                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                                );
+                            }
+
                             serde_json::to_value(&result).unwrap()
                         }
                         "code_editor" => {
@@ -370,8 +432,26 @@ impl AutofixPipeline {
                                         e
                                     ))
                                 })?;
+
+                            if self.verbose {
+                                println!("   [DEBUG] File path: {}", tool_input.file_path);
+                                println!(
+                                    "   [DEBUG] Old content length: {} chars",
+                                    tool_input.old_content.len()
+                                );
+                                println!(
+                                    "   [DEBUG] New content length: {} chars",
+                                    tool_input.new_content.len()
+                                );
+                            }
+
                             let result = code_tool.execute(tool_input, &self.workspace_path);
                             println!("   ✏️ Edit result: {}", result.message);
+
+                            if self.verbose && result.success {
+                                println!("   [DEBUG] Edit successful");
+                            }
+
                             serde_json::to_value(&result).unwrap()
                         }
                         "test_runner" => {
@@ -382,6 +462,15 @@ impl AutofixPipeline {
                                         e
                                     ))
                                 })?;
+
+                            if self.verbose {
+                                println!("   [DEBUG] Operation: {}", tool_input.operation);
+                                println!(
+                                    "   [DEBUG] Test identifier: {}",
+                                    tool_input.test_identifier
+                                );
+                            }
+
                             let result = test_tool.execute(tool_input, &self.workspace_path);
                             println!(
                                 "   🧪 Test result: {} (exit code: {})",
@@ -397,6 +486,12 @@ impl AutofixPipeline {
                                     result.xcresult_path
                                 );
                             }
+
+                            if self.verbose {
+                                println!("   [DEBUG] stdout length: {} bytes", result.stdout.len());
+                                println!("   [DEBUG] stderr length: {} bytes", result.stderr.len());
+                            }
+
                             serde_json::to_value(&result).unwrap()
                         }
                         _ => serde_json::json!({"error": format!("Unknown tool: {}", name)}),

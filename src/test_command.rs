@@ -16,6 +16,7 @@ pub struct TestCommand {
     workspace_path: PathBuf,
     test_id: String,
     knightrider_mode: bool,
+    verbose: bool,
 }
 
 impl TestCommand {
@@ -24,12 +25,14 @@ impl TestCommand {
         workspace_path: PathBuf,
         test_id: String,
         knightrider_mode: bool,
+        verbose: bool,
     ) -> Self {
         Self {
             test_result_path,
             workspace_path,
             test_id,
             knightrider_mode,
+            verbose,
         }
     }
 
@@ -65,6 +68,7 @@ impl TestCommand {
             &self.test_result_path,
             &self.workspace_path,
             self.knightrider_mode,
+            self.verbose,
         )?;
         pipeline.run(&detail).await?;
 

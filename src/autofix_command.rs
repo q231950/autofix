@@ -18,14 +18,21 @@ pub struct AutofixCommand {
     test_result_path: PathBuf,
     workspace_path: PathBuf,
     knightrider_mode: bool,
+    verbose: bool,
 }
 
 impl AutofixCommand {
-    pub fn new(test_result_path: PathBuf, workspace_path: PathBuf, knightrider_mode: bool) -> Self {
+    pub fn new(
+        test_result_path: PathBuf,
+        workspace_path: PathBuf,
+        knightrider_mode: bool,
+        verbose: bool,
+    ) -> Self {
         Self {
             test_result_path,
             workspace_path,
             knightrider_mode,
+            verbose,
         }
     }
 
@@ -67,6 +74,7 @@ impl AutofixCommand {
                     self.workspace_path.clone(),
                     failure.test_identifier_url.clone(),
                     self.knightrider_mode,
+                    self.verbose,
                 );
 
                 test_cmd.execute_ios_silent().await?;

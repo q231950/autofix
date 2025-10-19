@@ -38,6 +38,10 @@ struct Args {
     #[arg(long, global = true)]
     knightrider: bool,
 
+    /// Enable verbose mode: print detailed debug information
+    #[arg(short = 'v', long, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -64,8 +68,13 @@ async fn main() {
                 let test_result_path = args.test_result.expect("--test-result is required for iOS");
                 let workspace_path = args.workspace.expect("--workspace is required for iOS");
 
-                let cmd =
-                    TestCommand::new(test_result_path, workspace_path, test_id, args.knightrider);
+                let cmd = TestCommand::new(
+                    test_result_path,
+                    workspace_path,
+                    test_id,
+                    args.knightrider,
+                    args.verbose,
+                );
 
                 if let Err(e) = cmd.execute_ios().await {
                     eprintln!("Error: {}", e);
@@ -78,6 +87,7 @@ async fn main() {
                     args.workspace.unwrap_or_default(),
                     test_id,
                     args.knightrider,
+                    args.verbose,
                 );
 
                 if let Err(e) = cmd.execute_android() {
@@ -96,7 +106,12 @@ async fn main() {
                 let test_result_path = args.test_result.expect("--test-result is required for iOS");
                 let workspace_path = args.workspace.expect("--workspace is required for iOS");
 
-                let cmd = AutofixCommand::new(test_result_path, workspace_path, args.knightrider);
+                let cmd = AutofixCommand::new(
+                    test_result_path,
+                    workspace_path,
+                    args.knightrider,
+                    args.verbose,
+                );
 
                 if let Err(e) = cmd.execute_ios().await {
                     eprintln!("Error: {}", e);
@@ -108,6 +123,7 @@ async fn main() {
                     args.test_result.unwrap_or_default(),
                     args.workspace.unwrap_or_default(),
                     args.knightrider,
+                    args.verbose,
                 );
 
                 if let Err(e) = cmd.execute_android() {
