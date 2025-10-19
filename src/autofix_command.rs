@@ -39,8 +39,17 @@ impl AutofixCommand {
     /// Execute the autofix command for iOS
     pub async fn execute_ios(&self) -> Result<(), AutofixError> {
         println!("Running autofix for iOS...");
-        println!("Test result path: {}", self.test_result_path.display());
-        println!("Workspace path: {}", self.workspace_path.display());
+
+        if self.verbose {
+            println!(
+                "  [DEBUG] Test result path: {}",
+                self.test_result_path.display()
+            );
+            println!(
+                "  [DEBUG] Workspace path: {}",
+                self.workspace_path.display()
+            );
+        }
         println!();
 
         // Parse the xcresult file
@@ -48,15 +57,22 @@ impl AutofixCommand {
         let summary = parser.parse(&self.test_result_path)?;
 
         // Display summary information
-        Self::print_summary(&summary);
+        self.print_summary(&summary);
 
         // Process failed tests
         if summary.failed_tests > 0 {
-            Self::print_failed_tests(&summary);
+            if self.verbose {
+                Self::print_failed_tests(&summary);
+            }
 
             // Process each failed test
-            println!("Processing failed tests...");
+            println!(
+                "Processing {} failed test{}...",
+                summary.failed_tests,
+                if summary.failed_tests == 1 { "" } else { "s" }
+            );
             println!();
+
             for (index, failure) in summary.test_failures.iter().enumerate() {
                 println!("═══════════════════════════════════════════════════════════");
                 println!(
@@ -66,6 +82,11 @@ impl AutofixCommand {
                     failure.test_name
                 );
                 println!("═══════════════════════════════════════════════════════════");
+
+                if self.verbose {
+                    println!("  [DEBUG] Target: {}", failure.target_name);
+                    println!("  [DEBUG] Test ID: {}", failure.test_identifier_string);
+                }
                 println!();
 
                 // Use test command to get detailed information
@@ -88,15 +109,24 @@ impl AutofixCommand {
     }
 
     /// Print the test summary
-    fn print_summary(summary: &XCResultSummary) {
-        println!("Test Summary:");
-        println!("  Title: {}", summary.title);
-        println!("  Result: {}", summary.result);
-        println!("  Total tests: {}", summary.total_test_count);
-        println!("  Passed: {}", summary.passed_tests);
-        println!("  Failed: {}", summary.failed_tests);
-        println!("  Skipped: {}", summary.skipped_tests);
-        println!();
+    fn print_summary(&self, summary: &XCResultSummary) {
+        if self.verbose {
+            println!("Test Summary:");
+            println!("  Title: {}", summary.title);
+            println!("  Result: {}", summary.result);
+            println!("  Total tests: {}", summary.total_test_count);
+            println!("  Passed: {}", summary.passed_tests);
+            println!("  Failed: {}", summary.failed_tests);
+            println!("  Skipped: {}", summary.skipped_tests);
+            println!();
+        } else {
+            // In non-verbose mode, just show the key stats
+            println!(
+                "Tests: {} passed, {} failed, {} skipped",
+                summary.passed_tests, summary.failed_tests, summary.skipped_tests
+            );
+            println!();
+        }
     }
 
     /// Print the list of failed tests
@@ -128,6 +158,7 @@ mod tests {
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             false,
+            false,
         );
 
         assert_eq!(
@@ -142,6 +173,7 @@ mod tests {
         let cmd = AutofixCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
+            false,
             false,
         );
 

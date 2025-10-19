@@ -9,6 +9,7 @@ pub struct RateLimiter {
     state: Mutex<RateLimiterState>,
     tokens_per_minute: usize,
     enabled: bool,
+    verbose: bool,
 }
 
 struct RateLimiterState {
@@ -22,7 +23,8 @@ impl RateLimiter {
     /// # Arguments
     /// * `tokens_per_minute` - Maximum tokens allowed per minute (default: 50000)
     /// * `enabled` - Whether rate limiting is enabled
-    pub fn new(tokens_per_minute: usize, enabled: bool) -> Self {
+    /// * `verbose` - Whether to print verbose debug information
+    pub fn new(tokens_per_minute: usize, enabled: bool, verbose: bool) -> Self {
         Self {
             state: Mutex::new(RateLimiterState {
                 tokens_used: 0,
@@ -30,6 +32,7 @@ impl RateLimiter {
             }),
             tokens_per_minute,
             enabled,
+            verbose,
         }
     }
 
@@ -111,7 +114,10 @@ impl RateLimiter {
     /// Reads:
     /// * `ANTHROPIC_RATE_LIMIT_TPM` - Tokens per minute limit (default: 50000)
     /// * `ANTHROPIC_RATE_LIMIT_ENABLED` - Enable rate limiting (default: true)
-    pub fn from_env() -> Self {
+    ///
+    /// # Arguments
+    /// * `verbose` - Whether to print verbose debug information
+    pub fn from_env(verbose: bool) -> Self {
         let tokens_per_minute = std::env::var("ANTHROPIC_RATE_LIMIT_TPM")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -122,19 +128,21 @@ impl RateLimiter {
             .and_then(|s| s.parse().ok())
             .unwrap_or(true);
 
-        println!(
-            "⏱️  Rate limiter configured: {} tokens/minute ({})",
-            tokens_per_minute,
-            if enabled { "enabled" } else { "disabled" }
-        );
+        if verbose {
+            println!(
+                "  [DEBUG] Rate limiter configured: {} tokens/minute ({})",
+                tokens_per_minute,
+                if enabled { "enabled" } else { "disabled" }
+            );
+        }
 
-        Self::new(tokens_per_minute, enabled)
+        Self::new(tokens_per_minute, enabled, verbose)
     }
 }
 
 impl Default for RateLimiter {
     fn default() -> Self {
-        Self::new(50000, true)
+        Self::new(50000, true, false)
     }
 }
 
@@ -144,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_allows_under_limit() {
-        let limiter = RateLimiter::new(1000, true);
+        let limiter = RateLimiter::new(1000, true, false);
         assert!(limiter.check_and_wait(500).is_ok());
         limiter.record_usage(500);
         assert!(limiter.check_and_wait(400).is_ok());
@@ -152,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_blocks_over_limit() {
-        let limiter = RateLimiter::new(1000, true);
+        let limiter = RateLimiter::new(1000, true, false);
         limiter.record_usage(900);
         let result = limiter.check_and_wait(200);
         assert!(result.is_err());
@@ -160,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_disabled() {
-        let limiter = RateLimiter::new(1000, false);
+        let limiter = RateLimiter::new(1000, false, false);
         limiter.record_usage(900);
         assert!(limiter.check_and_wait(1000).is_ok());
     }

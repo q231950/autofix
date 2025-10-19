@@ -59,10 +59,15 @@ impl AutofixPipeline {
         let temp_dir = base_dir.join(uuid.to_string());
         fs::create_dir_all(&temp_dir)?;
 
-        println!("Created temporary directory: {}", temp_dir.display());
+        if verbose {
+            println!(
+                "  [DEBUG] Created temporary directory: {}",
+                temp_dir.display()
+            );
+        }
 
         // Create rate limiter from environment variables
-        let rate_limiter = Arc::new(RateLimiter::from_env());
+        let rate_limiter = Arc::new(RateLimiter::from_env(verbose));
 
         Ok(Self {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
