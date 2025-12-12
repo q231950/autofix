@@ -1,20 +1,20 @@
 // OpenAI provider implementation
 
 use super::{
-    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType,
-    StopReason, TokenUsage, ToolCall, ToolDefinition,
+    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType, StopReason,
+    TokenUsage, ToolCall, ToolDefinition,
 };
 use crate::llm::provider_trait::LLMProvider;
 use crate::rate_limiter::RateLimiter;
 use async_openai::{
+    Client,
     config::OpenAIConfig,
     types::{
-        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestUserMessageArgs, ChatCompletionRequestAssistantMessageArgs,
-        ChatCompletionTool, ChatCompletionToolType, ChatCompletionToolChoiceOption,
+        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+        ChatCompletionTool, ChatCompletionToolChoiceOption, ChatCompletionToolType,
         CreateChatCompletionRequestArgs, FinishReason, FunctionObjectArgs,
     },
-    Client,
 };
 use async_trait::async_trait;
 use futures::stream::Stream;
@@ -94,8 +94,8 @@ impl OpenAIProvider {
         // Extract token usage
         let usage = if let Some(usage_info) = response.usage {
             TokenUsage::new(
-                usage_info.prompt_tokens as u32,
-                usage_info.completion_tokens as u32,
+                usage_info.prompt_tokens,
+                usage_info.completion_tokens,
             )
         } else {
             TokenUsage::new(0, 0)
@@ -183,18 +183,16 @@ impl LLMProvider for OpenAIProvider {
                         })?
                         .into()
                 }
-                MessageRole::Assistant => {
-                    ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(message.content.clone())
-                        .build()
-                        .map_err(|e| {
-                            LLMError::InvalidRequest(format!(
-                                "Failed to build assistant message: {}",
-                                e
-                            ))
-                        })?
-                        .into()
-                }
+                MessageRole::Assistant => ChatCompletionRequestAssistantMessageArgs::default()
+                    .content(message.content.clone())
+                    .build()
+                    .map_err(|e| {
+                        LLMError::InvalidRequest(format!(
+                            "Failed to build assistant message: {}",
+                            e
+                        ))
+                    })?
+                    .into(),
             };
             messages.push(msg);
         }
@@ -216,25 +214,20 @@ impl LLMProvider for OpenAIProvider {
             request_builder.max_tokens(max_tokens as u16);
         }
         if let Some(temperature) = request.temperature {
-            request_builder.temperature(temperature as f32);
+            request_builder.temperature(temperature);
         }
 
-        let chat_request = request_builder.build().map_err(|e| {
-            LLMError::InvalidRequest(format!("Failed to build request: {}", e))
-        })?;
+        let chat_request = request_builder
+            .build()
+            .map_err(|e| LLMError::InvalidRequest(format!("Failed to build request: {}", e)))?;
 
         // Send request
-        let response = self
-            .client
-            .chat()
-            .create(chat_request)
-            .await
-            .map_err(|e| {
-                // Sanitize error message to remove potential API keys
-                let error_msg = format!("{}", e);
-                let sanitized = error_msg.replace(self.config.api_key(), "[REDACTED]");
-                LLMError::InvalidRequest(sanitized)
-            })?;
+        let response = self.client.chat().create(chat_request).await.map_err(|e| {
+            // Sanitize error message to remove potential API keys
+            let error_msg = format!("{}", e);
+            let sanitized = error_msg.replace(self.config.api_key(), "[REDACTED]");
+            LLMError::InvalidRequest(sanitized)
+        })?;
 
         // Record actual usage
         {

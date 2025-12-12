@@ -20,6 +20,7 @@ pub trait LLMProvider: Send + Sync {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse, LLMError>;
 
     /// Send a request and get a streaming response
+    #[allow(dead_code)] // Streaming not yet used in pipeline but implemented in providers
     async fn complete_stream(
         &self,
         request: LLMRequest,
@@ -34,9 +35,11 @@ pub trait LLMProvider: Send + Sync {
         Self: Sized;
 
     /// Get maximum context length for this provider/model
+    #[allow(dead_code)] // Not yet used but part of provider trait interface
     fn max_context_length(&self) -> u32;
 
     /// Check if provider supports streaming
+    #[allow(dead_code)] // Not yet used but part of provider trait interface
     fn supports_streaming(&self) -> bool {
         true // Default: most providers support streaming
     }

@@ -7,7 +7,9 @@ use std::env;
 /// Supported LLM provider types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ProviderType {
+    #[default]
     Claude,
     OpenAI,
     Ollama,
@@ -25,11 +27,6 @@ impl ProviderType {
     }
 }
 
-impl Default for ProviderType {
-    fn default() -> Self {
-        ProviderType::Claude
-    }
-}
 
 /// Configuration for an LLM provider
 #[derive(Debug, Clone)]
@@ -45,6 +42,7 @@ pub struct ProviderConfig {
 
 impl ProviderConfig {
     /// Create a new provider configuration
+    #[allow(dead_code)] // Not currently used but part of public API
     pub fn new(
         provider_type: ProviderType,
         api_key: String,
@@ -75,8 +73,9 @@ impl ProviderConfig {
         let api_key = match provider_type {
             ProviderType::Claude => env::var("ANTHROPIC_API_KEY")
                 .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?,
-            ProviderType::OpenAI => env::var("OPENAI_API_KEY")
-                .map_err(|_| "OPENAI_API_KEY not set".to_string())?,
+            ProviderType::OpenAI => {
+                env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?
+            }
             ProviderType::Ollama => {
                 // Ollama doesn't require an API key
                 "ollama".to_string()

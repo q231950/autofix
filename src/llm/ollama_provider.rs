@@ -2,20 +2,20 @@
 // Reuses async-openai client since Ollama is OpenAI-compatible
 
 use super::{
-    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType,
-    StopReason, TokenUsage, ToolCall, ToolDefinition,
+    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType, StopReason,
+    TokenUsage, ToolCall, ToolDefinition,
 };
 use crate::llm::provider_trait::LLMProvider;
 use crate::rate_limiter::RateLimiter;
 use async_openai::{
+    Client,
     config::OpenAIConfig,
     types::{
-        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestUserMessageArgs, ChatCompletionRequestAssistantMessageArgs,
-        ChatCompletionTool, ChatCompletionToolType, ChatCompletionToolChoiceOption,
+        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+        ChatCompletionTool, ChatCompletionToolChoiceOption, ChatCompletionToolType,
         CreateChatCompletionRequestArgs, FinishReason, FunctionObjectArgs,
     },
-    Client,
 };
 use async_trait::async_trait;
 use futures::stream::Stream;
@@ -96,8 +96,8 @@ impl OllamaProvider {
         // Extract token usage (may not be provided by all Ollama models)
         let usage = if let Some(usage_info) = response.usage {
             TokenUsage::new(
-                usage_info.prompt_tokens as u32,
-                usage_info.completion_tokens as u32,
+                usage_info.prompt_tokens,
+                usage_info.completion_tokens,
             )
         } else {
             // Ollama may not provide usage info, estimate based on content
@@ -157,8 +157,8 @@ impl LLMProvider for OllamaProvider {
 
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
         // Estimate tokens and check rate limiter (skip if rate_limit_tpm is 0 or None)
-        let should_rate_limit = self.config.rate_limit_tpm.is_some()
-            && self.config.rate_limit_tpm != Some(0);
+        let should_rate_limit =
+            self.config.rate_limit_tpm.is_some() && self.config.rate_limit_tpm != Some(0);
 
         if should_rate_limit {
             let estimated_tokens = self.estimate_tokens(&request);
@@ -197,18 +197,16 @@ impl LLMProvider for OllamaProvider {
                         })?
                         .into()
                 }
-                MessageRole::Assistant => {
-                    ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(message.content.clone())
-                        .build()
-                        .map_err(|e| {
-                            LLMError::InvalidRequest(format!(
-                                "Failed to build assistant message: {}",
-                                e
-                            ))
-                        })?
-                        .into()
-                }
+                MessageRole::Assistant => ChatCompletionRequestAssistantMessageArgs::default()
+                    .content(message.content.clone())
+                    .build()
+                    .map_err(|e| {
+                        LLMError::InvalidRequest(format!(
+                            "Failed to build assistant message: {}",
+                            e
+                        ))
+                    })?
+                    .into(),
             };
             messages.push(msg);
         }
@@ -230,33 +228,27 @@ impl LLMProvider for OllamaProvider {
             request_builder.max_tokens(max_tokens as u16);
         }
         if let Some(temperature) = request.temperature {
-            request_builder.temperature(temperature as f32);
+            request_builder.temperature(temperature);
         }
 
-        let chat_request = request_builder.build().map_err(|e| {
-            LLMError::InvalidRequest(format!("Failed to build request: {}", e))
-        })?;
+        let chat_request = request_builder
+            .build()
+            .map_err(|e| LLMError::InvalidRequest(format!("Failed to build request: {}", e)))?;
 
         // Send request to local Ollama instance
-        let response = self
-            .client
-            .chat()
-            .create(chat_request)
-            .await
-            .map_err(|e| {
-                let error_msg = format!("{}", e);
-                LLMError::InvalidRequest(format!("Ollama error: {}", error_msg))
-            })?;
+        let response = self.client.chat().create(chat_request).await.map_err(|e| {
+            let error_msg = format!("{}", e);
+            LLMError::InvalidRequest(format!("Ollama error: {}", error_msg))
+        })?;
 
         // Record actual usage (if rate limiting is enabled)
-        if should_rate_limit {
-            if let Some(usage_info) = &response.usage {
+        if should_rate_limit
+            && let Some(usage_info) = &response.usage {
                 let limiter = self.rate_limiter.lock().await;
                 limiter.record_usage(
                     (usage_info.prompt_tokens + usage_info.completion_tokens) as usize,
                 );
             }
-        }
 
         // Convert to LLMResponse
         self.convert_response(response)
@@ -317,9 +309,11 @@ impl LLMProvider for OllamaProvider {
 
         // Check endpoint is localhost
         if !config.api_base.starts_with("http://localhost:")
-            && !config.api_base.starts_with("http://127.0.0.1:") {
+            && !config.api_base.starts_with("http://127.0.0.1:")
+        {
             return Err(LLMError::ConfigurationError(
-                "Ollama endpoint must be localhost (http://localhost:11434/v1 or similar)".to_string(),
+                "Ollama endpoint must be localhost (http://localhost:11434/v1 or similar)"
+                    .to_string(),
             ));
         }
 

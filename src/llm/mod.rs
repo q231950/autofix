@@ -100,6 +100,7 @@ pub enum StopReason {
 
 /// Errors that can occur with LLM providers
 #[derive(Debug, Error)]
+#[allow(dead_code)] // Some variants used by providers but not directly in pipeline yet
 pub enum LLMError {
     #[error("Authentication failed: invalid API key")]
     AuthenticationError,

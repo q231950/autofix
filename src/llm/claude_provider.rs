@@ -1,8 +1,8 @@
 // Claude AI provider implementation
 
 use super::{
-    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType,
-    StopReason, TokenUsage, ToolCall, ToolDefinition,
+    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType, StopReason,
+    TokenUsage, ToolCall, ToolDefinition,
 };
 use crate::llm::provider_trait::LLMProvider;
 use crate::rate_limiter::RateLimiter;
@@ -43,10 +43,7 @@ impl ClaudeProvider {
     }
 
     /// Convert Claude response to LLMResponse
-    fn convert_response(
-        &self,
-        response: anthropic_sdk::Message,
-    ) -> Result<LLMResponse, LLMError> {
+    fn convert_response(&self, response: anthropic_sdk::Message) -> Result<LLMResponse, LLMError> {
         let mut content = String::new();
         let mut tool_calls = Vec::new();
 
@@ -59,11 +56,7 @@ impl ClaudeProvider {
                     }
                     content.push_str(&text);
                 }
-                ContentBlock::ToolUse {
-                    id,
-                    name,
-                    input,
-                } => {
+                ContentBlock::ToolUse { id, name, input } => {
                     tool_calls.push(ToolCall {
                         id: id.clone(),
                         name: name.clone(),
@@ -92,8 +85,8 @@ impl ClaudeProvider {
 
         // Extract token usage
         let usage = TokenUsage::new(
-            response.usage.input_tokens as u32,
-            response.usage.output_tokens as u32,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
         );
 
         Ok(LLMResponse {
@@ -180,7 +173,7 @@ impl LLMProvider for ClaudeProvider {
 
         // Add temperature if present
         if let Some(temperature) = request.temperature {
-            builder = builder.temperature(temperature as f32);
+            builder = builder.temperature(temperature);
         }
 
         // Send request
@@ -201,7 +194,9 @@ impl LLMProvider for ClaudeProvider {
         // Record actual usage
         {
             let limiter = self.rate_limiter.lock().await;
-            limiter.record_usage((response.usage.input_tokens + response.usage.output_tokens) as usize);
+            limiter.record_usage(
+                (response.usage.input_tokens + response.usage.output_tokens) as usize,
+            );
         }
 
         // Convert to LLMResponse

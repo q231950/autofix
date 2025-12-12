@@ -69,11 +69,15 @@ impl AutofixPipeline {
         }
 
         // Create provider from configuration
-        let provider = ProviderFactory::create(provider_config.clone())
-            .map_err(|e| PipelineError::AnthropicApiError(format!("Failed to create provider: {}", e)))?;
+        let provider = ProviderFactory::create(provider_config.clone()).map_err(|e| {
+            PipelineError::AnthropicApiError(format!("Failed to create provider: {}", e))
+        })?;
 
         // Create rate limiter for the configured provider
-        let rate_limiter = Arc::new(RateLimiter::from_env(provider_config.provider_type, verbose));
+        let rate_limiter = Arc::new(RateLimiter::from_env(
+            provider_config.provider_type,
+            verbose,
+        ));
 
         Ok(Self {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
@@ -188,7 +192,7 @@ impl AutofixPipeline {
                 .metadata()
                 .and_then(|m| m.modified())
                 .ok()
-                .map(|t| std::cmp::Reverse(t))
+                .map(std::cmp::Reverse)
         });
 
         image_files.first().map(|entry| entry.path())
@@ -296,11 +300,10 @@ impl AutofixPipeline {
         let mut content_blocks = Vec::new();
 
         // Add text content if present
-        if let Some(text) = response.content {
-            if !text.is_empty() {
+        if let Some(text) = response.content
+            && !text.is_empty() {
                 content_blocks.push(ContentBlock::Text { text });
             }
-        }
 
         // Add tool calls
         for tool_call in response.tool_calls {
@@ -433,7 +436,8 @@ impl AutofixPipeline {
                 .map(|tool| crate::llm::ToolDefinition {
                     name: tool.name.clone(),
                     description: tool.description.clone(),
-                    input_schema: serde_json::to_value(&tool.input_schema).unwrap_or(serde_json::json!({})),
+                    input_schema: serde_json::to_value(&tool.input_schema)
+                        .unwrap_or(serde_json::json!({})),
                 })
                 .collect();
 
@@ -490,7 +494,8 @@ impl AutofixPipeline {
             })?;
 
             // Convert response back to anthropic format for compatibility with rest of pipeline
-            let response = Self::llm_response_to_anthropic_message(llm_response, &self.provider_config.model);
+            let response =
+                Self::llm_response_to_anthropic_message(llm_response, &self.provider_config.model);
 
             // Record actual token usage from the API response
             let actual_input_tokens = response.usage.input_tokens as usize;
@@ -779,11 +784,10 @@ impl AutofixPipeline {
 
             if line.starts_with("File:") {
                 file_path = Some(line.trim_start_matches("File:").trim().to_string());
-            } else if line.starts_with("Line:") {
-                if let Ok(num) = line.trim_start_matches("Line:").trim().parse::<u32>() {
+            } else if line.starts_with("Line:")
+                && let Ok(num) = line.trim_start_matches("Line:").trim().parse::<u32>() {
                     line_number = Some(num);
                 }
-            }
         }
 
         // Generate Xcode deep link if we have both file and line
@@ -838,9 +842,9 @@ impl AutofixPipeline {
 
         // Convert to token estimate (rough: 1 token ≈ 4 chars)
         // Add 20% buffer for safety
-        let estimated_tokens = (char_count / 4) * 12 / 10;
+        
 
-        estimated_tokens
+        (char_count / 4) * 12 / 10
     }
 
     fn estimate_content_param_chars(&self, blocks: &[ContentBlockParam]) -> usize {

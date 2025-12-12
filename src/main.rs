@@ -11,7 +11,7 @@ mod xctestresultdetailparser;
 
 use autofix_command::AutofixCommand;
 use clap::{Parser, Subcommand};
-use llm::{ProviderConfig, ProviderType};
+use llm::ProviderType;
 use std::path::PathBuf;
 use test_command::TestCommand;
 
