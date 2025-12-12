@@ -2,3 +2,12 @@
 .DS_Store
 .autofix
 .claude
+*.log
+.env*
+!.env.example
+*.rs.bk
+*.rlib
+*.prof*
+.idea/
+debug/
+release/

@@ -1,4 +1,5 @@
 mod autofix_command;
+mod llm;
 mod pipeline;
 mod rate_limiter;
 mod test_command;

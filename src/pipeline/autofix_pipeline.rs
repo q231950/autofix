@@ -1,4 +1,5 @@
 use super::prompts;
+use crate::llm::ProviderType;
 use crate::rate_limiter::RateLimiter;
 use crate::tools::{
     CodeEditorInput, CodeEditorTool, DirectoryInspectorInput, DirectoryInspectorTool,
@@ -67,7 +68,8 @@ impl AutofixPipeline {
         }
 
         // Create rate limiter from environment variables
-        let rate_limiter = Arc::new(RateLimiter::from_env(verbose));
+        // TODO: This will be updated to use the configured provider type
+        let rate_limiter = Arc::new(RateLimiter::from_env(ProviderType::Claude, verbose));
 
         Ok(Self {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
