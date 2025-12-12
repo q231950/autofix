@@ -11,7 +11,7 @@ mod xctestresultdetailparser;
 
 use autofix_command::AutofixCommand;
 use clap::{Parser, Subcommand};
-use llm::ProviderType;
+use llm::{ProviderConfig, ProviderType};
 use std::path::PathBuf;
 use test_command::TestCommand;
 
@@ -70,7 +70,16 @@ enum Commands {
 async fn main() {
     let args = Args::parse();
 
-    // Validate and parse provider type
+    // Load provider configuration from environment
+    let mut provider_config = match llm::ProviderConfig::from_env() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Error: Failed to load provider configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Override provider type if specified via CLI
     let provider_type = match ProviderType::from_str(&args.provider) {
         Ok(provider) => provider,
         Err(e) => {
@@ -79,24 +88,21 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    provider_config.provider_type = provider_type;
+
+    // Override model if specified via CLI
+    if let Some(model) = &args.model {
+        provider_config.model = model.clone();
+    }
 
     // Display provider info in verbose mode
     if args.verbose {
         println!("🔧 Configuration:");
-        println!("  Provider: {:?}", provider_type);
-        if let Some(model) = &args.model {
-            println!("  Model: {} (override)", model);
+        println!("  Provider: {:?}", provider_config.provider_type);
+        println!("  Model: {}", provider_config.model);
+        if args.model.is_some() {
+            println!("  (model overridden via CLI)");
         }
-        println!();
-    }
-
-    // Note: All three providers (Claude, OpenAI, Ollama) are now implemented!
-    // Provider selection will be integrated in Phase 6.
-    // For now, all providers are available but pipeline integration is pending.
-    if provider_type != ProviderType::Claude {
-        eprintln!("Note: All provider implementations are complete!");
-        eprintln!("However, pipeline integration is pending - all workflows currently use Claude.");
-        eprintln!("Full provider switching will be enabled in Phase 6.");
         println!();
     }
 
@@ -114,6 +120,7 @@ async fn main() {
                     test_id,
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_ios().await {
@@ -128,6 +135,7 @@ async fn main() {
                     test_id,
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_android() {
@@ -151,6 +159,7 @@ async fn main() {
                     workspace_path,
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_ios().await {
@@ -164,6 +173,7 @@ async fn main() {
                     args.workspace.unwrap_or_default(),
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_android() {

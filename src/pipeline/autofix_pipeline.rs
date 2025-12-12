@@ -1,5 +1,5 @@
 use super::prompts;
-use crate::llm::ProviderType;
+use crate::llm::{LLMProvider, ProviderConfig, ProviderFactory};
 use crate::rate_limiter::RateLimiter;
 use crate::tools::{
     CodeEditorInput, CodeEditorTool, DirectoryInspectorInput, DirectoryInspectorTool,
@@ -41,6 +41,8 @@ pub struct AutofixPipeline {
     knightrider_mode: bool,
     verbose: bool,
     rate_limiter: Arc<RateLimiter>,
+    provider: Box<dyn LLMProvider>,
+    provider_config: ProviderConfig,
 }
 
 impl AutofixPipeline {
@@ -50,6 +52,7 @@ impl AutofixPipeline {
         workspace_path: P,
         knightrider_mode: bool,
         verbose: bool,
+        provider_config: ProviderConfig,
     ) -> Result<Self, PipelineError> {
         // Create .autofix/tmp directory in current directory
         let base_dir = PathBuf::from(".autofix/tmp");
@@ -67,9 +70,12 @@ impl AutofixPipeline {
             );
         }
 
-        // Create rate limiter from environment variables
-        // TODO: This will be updated to use the configured provider type
-        let rate_limiter = Arc::new(RateLimiter::from_env(ProviderType::Claude, verbose));
+        // Create provider from configuration
+        let provider = ProviderFactory::create(provider_config.clone())
+            .map_err(|e| PipelineError::AnthropicApiError(format!("Failed to create provider: {}", e)))?;
+
+        // Create rate limiter for the configured provider
+        let rate_limiter = Arc::new(RateLimiter::from_env(provider_config.provider_type, verbose));
 
         Ok(Self {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
@@ -78,6 +84,8 @@ impl AutofixPipeline {
             knightrider_mode,
             verbose,
             rate_limiter,
+            provider,
+            provider_config,
         })
     }
 
@@ -194,7 +202,7 @@ impl AutofixPipeline {
         detail: &XCTestResultDetail,
         test_file_path: &Path,
     ) -> Result<(), PipelineError> {
-        println!("Step 3: Running autofix with Claude AI...");
+        println!("Step 3: Running autofix with LLM provider...");
 
         if self.verbose {
             println!(
@@ -205,13 +213,11 @@ impl AutofixPipeline {
                     "Standard"
                 }
             );
+            println!("  [DEBUG] Provider: {:?}", self.provider.provider_type());
+            println!("  [DEBUG] Model: {}", self.provider_config.model);
             println!("  [DEBUG] Test file path: {}", test_file_path.display());
             println!("  [DEBUG] Test name: {}", detail.test_name);
         }
-
-        // Create Anthropic client from environment
-        let client =
-            Anthropic::from_env().map_err(|e| PipelineError::AnthropicApiError(e.to_string()))?;
 
         // Read the test file contents
         let test_file_contents = fs::read_to_string(test_file_path)?;
@@ -265,17 +271,19 @@ impl AutofixPipeline {
         }
 
         // Both modes use tools - the difference is in the prompt guidance
-        self.run_with_tools(client, content_blocks, detail, test_file_path)
+        self.run_with_tools(content_blocks, detail, test_file_path)
             .await
     }
 
     async fn run_with_tools(
         &self,
-        client: Anthropic,
         initial_content: Vec<ContentBlockParam>,
         detail: &XCTestResultDetail,
         test_file_path: &Path,
     ) -> Result<(), PipelineError> {
+        // Create Anthropic client for now (will be replaced with provider abstraction later)
+        let client =
+            Anthropic::from_env().map_err(|e| PipelineError::AnthropicApiError(e.to_string()))?;
         // Create tool instances
         let dir_tool = DirectoryInspectorTool::new();
         let code_tool = CodeEditorTool::new();
@@ -797,11 +805,13 @@ mod tests {
 
     #[test]
     fn test_pipeline_creation() {
+        let config = ProviderConfig::default();
         let pipeline = AutofixPipeline::new(
             "tests/fixtures/sample.xcresult",
             "path/to/workspace",
             false,
             false,
+            config,
         );
 
         assert!(pipeline.is_ok());
@@ -817,11 +827,13 @@ mod tests {
 
     #[test]
     fn test_pipeline_temp_dir_has_uuid() {
+        let config = ProviderConfig::default();
         let pipeline = AutofixPipeline::new(
             "tests/fixtures/sample.xcresult",
             "path/to/workspace",
             false,
             false,
+            config,
         )
         .unwrap();
 

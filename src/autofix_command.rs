@@ -1,3 +1,4 @@
+use crate::llm::ProviderConfig;
 use crate::test_command::{TestCommand, TestCommandError};
 use crate::xcresultparser::{XCResultParser, XCResultParserError, XCResultSummary};
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ pub struct AutofixCommand {
     workspace_path: PathBuf,
     knightrider_mode: bool,
     verbose: bool,
+    provider_config: ProviderConfig,
 }
 
 impl AutofixCommand {
@@ -27,12 +29,14 @@ impl AutofixCommand {
         workspace_path: PathBuf,
         knightrider_mode: bool,
         verbose: bool,
+        provider_config: ProviderConfig,
     ) -> Self {
         Self {
             test_result_path,
             workspace_path,
             knightrider_mode,
             verbose,
+            provider_config,
         }
     }
 
@@ -96,6 +100,7 @@ impl AutofixCommand {
                     failure.test_identifier_url.clone(),
                     self.knightrider_mode,
                     self.verbose,
+                    self.provider_config.clone(),
                 );
 
                 test_cmd.execute_ios_silent().await?;
@@ -154,11 +159,13 @@ mod tests {
 
     #[test]
     fn test_autofix_command_creation() {
+        let config = ProviderConfig::default();
         let cmd = AutofixCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             false,
             false,
+            config,
         );
 
         assert_eq!(
@@ -170,11 +177,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_ios_with_fixture() {
+        let config = ProviderConfig::default();
         let cmd = AutofixCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             false,
             false,
+            config,
         );
 
         // This will only work if the fixture exists
