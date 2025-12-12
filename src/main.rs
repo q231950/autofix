@@ -81,17 +81,13 @@ async fn main() {
         println!("Using LLM provider: {:?}", provider_type);
     }
 
-    // Note: Provider selection will be integrated in Phase 6.
-    // For now, Claude and OpenAI providers are available, but pipeline integration is pending.
-    if provider_type == ProviderType::Ollama {
-        eprintln!("Warning: Ollama provider is not yet implemented.");
-        eprintln!("Only 'claude' and 'openai' providers are currently available.");
-        eprintln!("Continuing with Claude provider...");
-        println!();
-    } else if provider_type != ProviderType::Claude {
-        eprintln!("Note: Provider abstraction is complete, but pipeline integration is pending.");
-        eprintln!("All providers currently use Claude's anthropic-sdk for now.");
-        eprintln!("Full provider switching will be enabled in a future release.");
+    // Note: All three providers (Claude, OpenAI, Ollama) are now implemented!
+    // Provider selection will be integrated in Phase 6.
+    // For now, all providers are available but pipeline integration is pending.
+    if provider_type != ProviderType::Claude {
+        eprintln!("Note: All provider implementations are complete!");
+        eprintln!("However, pipeline integration is pending - all workflows currently use Claude.");
+        eprintln!("Full provider switching will be enabled in Phase 6.");
         println!();
     }
 
