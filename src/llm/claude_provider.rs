@@ -1,17 +1,17 @@
 // Claude AI provider implementation
 
 use super::{
-    LLMError, LLMRequest, LLMResponse, Message, MessageRole, ProviderConfig, ProviderType,
+    LLMError, LLMRequest, LLMResponse, MessageRole, ProviderConfig, ProviderType,
     StopReason, TokenUsage, ToolCall, ToolDefinition,
 };
 use crate::llm::provider_trait::LLMProvider;
 use crate::rate_limiter::RateLimiter;
 use anthropic_sdk::{
     Anthropic, ContentBlock, ContentBlockParam, MessageContent, MessageCreateBuilder,
-    StopReason as AnthropicStopReason, Tool as AnthropicTool, ToolChoice, ToolUse,
+    StopReason as AnthropicStopReason, Tool as AnthropicTool, ToolChoice,
 };
 use async_trait::async_trait;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -24,34 +24,20 @@ pub struct ClaudeProvider {
 }
 
 impl ClaudeProvider {
-    /// Convert LLMRequest messages to Claude format
-    fn convert_messages(&self, messages: &[Message]) -> Vec<MessageContent> {
-        messages
-            .iter()
-            .map(|msg| {
-                let role = match msg.role {
-                    MessageRole::User => anthropic_sdk::Role::User,
-                    MessageRole::Assistant => anthropic_sdk::Role::Assistant,
-                    MessageRole::Tool => anthropic_sdk::Role::User, // Claude doesn't have separate tool role
-                };
-                MessageContent {
-                    role,
-                    content: vec![ContentBlockParam::Text {
-                        text: msg.content.clone(),
-                    }],
-                }
-            })
-            .collect()
-    }
-
     /// Convert tool definitions to Claude format
-    fn convert_tools(&self, tools: &[ToolDefinition]) -> Vec<AnthropicTool> {
+    fn convert_tools(&self, tools: &[ToolDefinition]) -> Result<Vec<AnthropicTool>, LLMError> {
         tools
             .iter()
-            .map(|tool| AnthropicTool {
-                name: tool.name.clone(),
-                description: tool.description.clone(),
-                input_schema: tool.input_schema.clone(),
+            .map(|tool| {
+                // The Tool type can be deserialized from JSON
+                serde_json::from_value(serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                }))
+                .map_err(|e| {
+                    LLMError::InvalidRequest(format!("Failed to convert tool definition: {}", e))
+                })
             })
             .collect()
     }
@@ -59,7 +45,7 @@ impl ClaudeProvider {
     /// Convert Claude response to LLMResponse
     fn convert_response(
         &self,
-        response: anthropic_sdk::MessageResponse,
+        response: anthropic_sdk::Message,
     ) -> Result<LLMResponse, LLMError> {
         let mut content = String::new();
         let mut tool_calls = Vec::new();
@@ -83,6 +69,14 @@ impl ClaudeProvider {
                         name: name.clone(),
                         input,
                     });
+                }
+                ContentBlock::Image { .. } => {
+                    // Images in responses are not expected in this context
+                    // Silently skip them for now
+                }
+                ContentBlock::ToolResult { .. } => {
+                    // Tool results in responses are not expected in this context
+                    // Silently skip them for now
                 }
             }
         }
@@ -154,40 +148,46 @@ impl LLMProvider for ClaudeProvider {
             }
         }
 
-        // Build request
-        let mut builder = MessageCreateBuilder::new(&self.config.model);
+        // Determine max_tokens - required parameter
+        let max_tokens = request.max_tokens.unwrap_or(4096);
+
+        // Build request with model and max_tokens (both required in constructor)
+        let mut builder = MessageCreateBuilder::new(&self.config.model, max_tokens);
 
         // Add system prompt if present
         if let Some(system) = &request.system_prompt {
             builder = builder.system(system.clone());
         }
 
-        // Add messages
-        let messages = self.convert_messages(&request.messages);
-        for message in messages {
-            builder = builder.message(message);
+        // Add messages - alternate between user and assistant
+        for message in &request.messages {
+            let content_block = ContentBlockParam::Text {
+                text: message.content.clone(),
+            };
+            let content = MessageContent::Blocks(vec![content_block]);
+
+            builder = match message.role {
+                MessageRole::User | MessageRole::Tool => builder.user(content),
+                MessageRole::Assistant => builder.assistant(content),
+            };
         }
 
         // Add tools if present
         if !request.tools.is_empty() {
-            let tools = self.convert_tools(&request.tools);
+            let tools = self.convert_tools(&request.tools)?;
             builder = builder.tools(tools).tool_choice(ToolChoice::Auto);
         }
 
-        // Add parameters
-        if let Some(max_tokens) = request.max_tokens {
-            builder = builder.max_tokens(max_tokens);
-        }
+        // Add temperature if present
         if let Some(temperature) = request.temperature {
-            builder = builder.temperature(temperature as f64);
+            builder = builder.temperature(temperature as f32);
         }
 
         // Send request
         let response = self
             .client
-            .create_message(builder.build().map_err(|e| {
-                LLMError::InvalidRequest(format!("Failed to build request: {}", e))
-            })?)
+            .messages()
+            .create(builder.build())
             .await
             .map_err(|e| {
                 // Sanitize error message to remove potential API keys
@@ -195,16 +195,13 @@ impl LLMProvider for ClaudeProvider {
                 let sanitized = error_msg
                     .replace(self.config.api_key(), "[REDACTED]")
                     .replace("sk-ant-", "[REDACTED]");
-                LLMError::NetworkError(reqwest::Error::new(
-                    reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                    sanitized,
-                ))
+                LLMError::InvalidRequest(sanitized)
             })?;
 
         // Record actual usage
         {
             let limiter = self.rate_limiter.lock().await;
-            limiter.record_usage(response.usage.input_tokens + response.usage.output_tokens);
+            limiter.record_usage((response.usage.input_tokens + response.usage.output_tokens) as usize);
         }
 
         // Convert to LLMResponse

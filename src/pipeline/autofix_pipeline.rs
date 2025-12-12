@@ -281,11 +281,11 @@ impl AutofixPipeline {
         let code_tool = CodeEditorTool::new();
         let test_tool = TestRunnerTool::new();
 
-        // Build tools for Anthropic API
+        // Build tools for LLM API
         let tools: Vec<Tool> = vec![
-            serde_json::from_value(dir_tool.to_anthropic_tool()).unwrap(),
-            serde_json::from_value(code_tool.to_anthropic_tool()).unwrap(),
-            serde_json::from_value(test_tool.to_anthropic_tool()).unwrap(),
+            serde_json::from_value(dir_tool.to_tool_definition()).unwrap(),
+            serde_json::from_value(code_tool.to_tool_definition()).unwrap(),
+            serde_json::from_value(test_tool.to_tool_definition()).unwrap(),
         ];
 
         // Track conversation history: (user_content, assistant_content)

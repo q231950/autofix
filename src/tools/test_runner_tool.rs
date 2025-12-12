@@ -51,7 +51,7 @@ Returns exit code, stdout, stderr, success status, and detailed test failure inf
         }
     }
 
-    pub fn to_anthropic_tool(&self) -> serde_json::Value {
+    pub fn to_tool_definition(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name,
             "description": self.description,

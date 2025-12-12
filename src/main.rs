@@ -11,6 +11,7 @@ mod xctestresultdetailparser;
 
 use autofix_command::AutofixCommand;
 use clap::{Parser, Subcommand};
+use llm::ProviderType;
 use std::path::PathBuf;
 use test_command::TestCommand;
 
@@ -43,6 +44,10 @@ struct Args {
     #[arg(short = 'v', long, global = true)]
     verbose: bool,
 
+    /// LLM provider to use (claude, openai, ollama)
+    #[arg(long, default_value = "claude", global = true)]
+    provider: String,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -60,6 +65,35 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    // Validate and parse provider type
+    let provider_type = match ProviderType::from_str(&args.provider) {
+        Ok(provider) => provider,
+        Err(e) => {
+            eprintln!("Error: Invalid provider '{}': {}", args.provider, e);
+            eprintln!("Valid providers: claude, openai, ollama");
+            std::process::exit(1);
+        }
+    };
+
+    // Display provider info in verbose mode
+    if args.verbose {
+        println!("Using LLM provider: {:?}", provider_type);
+    }
+
+    // Note: Provider selection will be integrated in Phase 6.
+    // For now, Claude and OpenAI providers are available, but pipeline integration is pending.
+    if provider_type == ProviderType::Ollama {
+        eprintln!("Warning: Ollama provider is not yet implemented.");
+        eprintln!("Only 'claude' and 'openai' providers are currently available.");
+        eprintln!("Continuing with Claude provider...");
+        println!();
+    } else if provider_type != ProviderType::Claude {
+        eprintln!("Note: Provider abstraction is complete, but pipeline integration is pending.");
+        eprintln!("All providers currently use Claude's anthropic-sdk for now.");
+        eprintln!("Full provider switching will be enabled in a future release.");
+        println!();
+    }
 
     match args.command {
         // Handle "autofix test --test-id ..." subcommand

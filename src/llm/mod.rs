@@ -3,11 +3,13 @@
 
 pub mod claude_provider;
 pub mod config;
+pub mod openai_provider;
 pub mod provider_trait;
 
 // Re-export core types
 pub use claude_provider::ClaudeProvider;
 pub use config::{ProviderConfig, ProviderType};
+pub use openai_provider::OpenAIProvider;
 pub use provider_trait::LLMProvider;
 
 use serde::{Deserialize, Serialize};
@@ -130,9 +132,10 @@ impl ProviderFactory {
                 ClaudeProvider::validate_config(&config)?;
                 Ok(Box::new(ClaudeProvider::new(config)?))
             }
-            ProviderType::OpenAI => Err(LLMError::ConfigurationError(
-                "OpenAI provider not yet implemented".to_string(),
-            )),
+            ProviderType::OpenAI => {
+                OpenAIProvider::validate_config(&config)?;
+                Ok(Box::new(OpenAIProvider::new(config)?))
+            }
             ProviderType::Ollama => Err(LLMError::ConfigurationError(
                 "Ollama provider not yet implemented".to_string(),
             )),
