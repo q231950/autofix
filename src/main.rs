@@ -48,6 +48,10 @@ struct Args {
     #[arg(long, default_value = "claude", global = true)]
     provider: String,
 
+    /// Model to use (overrides provider default)
+    #[arg(long, global = true)]
+    model: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -78,7 +82,12 @@ async fn main() {
 
     // Display provider info in verbose mode
     if args.verbose {
-        println!("Using LLM provider: {:?}", provider_type);
+        println!("🔧 Configuration:");
+        println!("  Provider: {:?}", provider_type);
+        if let Some(model) = &args.model {
+            println!("  Model: {} (override)", model);
+        }
+        println!();
     }
 
     // Note: All three providers (Claude, OpenAI, Ollama) are now implemented!
