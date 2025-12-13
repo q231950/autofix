@@ -1,3 +1,4 @@
+use crate::llm::ProviderConfig;
 use crate::pipeline::{AutofixPipeline, PipelineError};
 use crate::xctestresultdetailparser::{XCTestResultDetailParser, XCTestResultDetailParserError};
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ pub struct TestCommand {
     test_id: String,
     knightrider_mode: bool,
     verbose: bool,
+    provider_config: ProviderConfig,
 }
 
 impl TestCommand {
@@ -26,6 +28,7 @@ impl TestCommand {
         test_id: String,
         knightrider_mode: bool,
         verbose: bool,
+        provider_config: ProviderConfig,
     ) -> Self {
         Self {
             test_result_path,
@@ -33,6 +36,7 @@ impl TestCommand {
             test_id,
             knightrider_mode,
             verbose,
+            provider_config,
         }
     }
 
@@ -69,6 +73,7 @@ impl TestCommand {
             &self.workspace_path,
             self.knightrider_mode,
             self.verbose,
+            self.provider_config.clone(),
         )?;
         pipeline.run(&detail).await?;
 
@@ -148,12 +153,14 @@ mod tests {
 
     #[test]
     fn test_command_creation() {
+        let config = ProviderConfig::default();
         let cmd = TestCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             "test://example".to_string(),
             false,
             false,
+            config,
         );
 
         assert_eq!(
@@ -166,12 +173,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_ios_with_fixture() {
+        let config = ProviderConfig::default();
         let cmd = TestCommand::new(
             PathBuf::from("tests/fixtures/sample.xcresult"),
             PathBuf::from("path/to/workspace"),
             "test://com.apple.xcode/AutoFixSampler/AutoFixSamplerUITests/AutoFixSamplerUITests/testExample".to_string(),
             false,
             false,
+            config,
         );
 
         // This will only work if the fixture exists

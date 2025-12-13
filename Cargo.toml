@@ -14,3 +14,11 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 base64 = "0.22"
 regex = "1.11"
 glob = "0.3"
+async-openai = "0.20"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+reqwest-middleware = "0.2"
+reqwest-retry = "0.4"
+secrecy = { version = "0.8", features = ["serde"] }
+dotenvy = "0.15"
+async-trait = "0.1"
+futures = "0.3"

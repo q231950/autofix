@@ -1,12 +1,14 @@
+use crate::llm::ProviderType;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// A rolling window rate limiter for tracking API token usage
 ///
-/// This prevents hitting Anthropic's rate limits by tracking actual token usage
+/// This prevents hitting provider rate limits by tracking actual token usage
 /// from API responses over a rolling 60-second window and delaying requests when necessary.
 pub struct RateLimiter {
+    provider_type: ProviderType,
     state: Mutex<RateLimiterState>,
     tokens_per_minute: usize,
     enabled: bool,
@@ -16,24 +18,41 @@ pub struct RateLimiter {
 struct RateLimiterState {
     // Rolling window of (timestamp, tokens_used) entries
     usage_history: VecDeque<(Instant, usize)>,
+    window_start: Instant,
+    tokens_used: usize,
 }
 
 impl RateLimiter {
     /// Create a new rate limiter with the specified tokens per minute limit
     ///
     /// # Arguments
+    /// * `provider_type` - The LLM provider this rate limiter is for
     /// * `tokens_per_minute` - Maximum tokens allowed per minute (default: 50000)
     /// * `enabled` - Whether rate limiting is enabled
     /// * `verbose` - Whether to print verbose debug information
-    pub fn new(tokens_per_minute: usize, enabled: bool, verbose: bool) -> Self {
+    pub fn new(
+        provider_type: ProviderType,
+        tokens_per_minute: usize,
+        enabled: bool,
+        verbose: bool,
+    ) -> Self {
+        let now = Instant::now();
         Self {
+            provider_type,
             state: Mutex::new(RateLimiterState {
                 usage_history: VecDeque::new(),
+                window_start: now,
+                tokens_used: 0,
             }),
             tokens_per_minute,
             enabled,
             verbose,
         }
+    }
+
+    /// Get the provider type this rate limiter is for
+    pub fn provider_type(&self) -> ProviderType {
+        self.provider_type
     }
 
     /// Check if a request with the given token count can proceed
@@ -165,13 +184,16 @@ impl RateLimiter {
     /// Create a rate limiter from environment variables
     ///
     /// Reads:
-    /// * `ANTHROPIC_RATE_LIMIT_TPM` - Tokens per minute limit (default: 50000)
+    /// * `AUTOFIX_RATE_LIMIT_TPM` - Tokens per minute limit
+    /// * `ANTHROPIC_RATE_LIMIT_TPM` - Legacy tokens per minute limit (fallback)
     /// * `ANTHROPIC_RATE_LIMIT_ENABLED` - Enable rate limiting (default: true)
     ///
     /// # Arguments
+    /// * `provider_type` - The LLM provider this rate limiter is for
     /// * `verbose` - Whether to print verbose debug information
-    pub fn from_env(verbose: bool) -> Self {
-        let tokens_per_minute = std::env::var("ANTHROPIC_RATE_LIMIT_TPM")
+    pub fn from_env(provider_type: ProviderType, verbose: bool) -> Self {
+        let tokens_per_minute = std::env::var("AUTOFIX_RATE_LIMIT_TPM")
+            .or_else(|_| std::env::var("ANTHROPIC_RATE_LIMIT_TPM"))
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(50000);
@@ -183,19 +205,27 @@ impl RateLimiter {
 
         if verbose {
             println!(
-                "  [DEBUG] Rate limiter configured: {} tokens/minute ({})",
+                "  [DEBUG] Rate limiter configured for {:?}: {} tokens/minute ({})",
+                provider_type,
                 tokens_per_minute,
                 if enabled { "enabled" } else { "disabled" }
             );
         }
 
-        Self::new(tokens_per_minute, enabled, verbose)
+        Self::new(provider_type, tokens_per_minute, enabled, verbose)
+    }
+
+    /// Create a rate limiter with provider-specific defaults
+    pub fn for_provider(provider_type: ProviderType, rate_limit_tpm: Option<u32>) -> Self {
+        let tokens_per_minute = rate_limit_tpm.unwrap_or(50000) as usize;
+        let enabled = rate_limit_tpm.is_some(); // Disable if no limit specified
+        Self::new(provider_type, tokens_per_minute, enabled, false)
     }
 }
 
 impl Default for RateLimiter {
     fn default() -> Self {
-        Self::new(50000, true, false)
+        Self::new(ProviderType::Claude, 50000, true, false)
     }
 }
 
@@ -205,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_allows_under_limit() {
-        let limiter = RateLimiter::new(1000, true, false);
+        let limiter = RateLimiter::new(ProviderType::Claude, 1000, true, false);
         // Check if first request can proceed (no history yet)
         assert!(limiter.check_and_wait(500).is_ok());
         // Record actual usage from API response
@@ -222,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_blocks_over_limit() {
-        let limiter = RateLimiter::new(1000, true, false);
+        let limiter = RateLimiter::new(ProviderType::Claude, 1000, true, false);
         // Record 900 tokens used
         limiter.record_usage(900);
         // Next request would exceed limit
@@ -232,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_disabled() {
-        let limiter = RateLimiter::new(1000, false, false);
+        let limiter = RateLimiter::new(ProviderType::Claude, 1000, false, false);
         // When disabled, all requests should succeed
         assert!(limiter.check_and_wait(900).is_ok());
         assert!(limiter.check_and_wait(1000).is_ok());
@@ -240,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_rolling_window() {
-        let limiter = RateLimiter::new(1000, true, false);
+        let limiter = RateLimiter::new(ProviderType::Claude, 1000, true, false);
         // Record some usage
         limiter.record_usage(500);
         // Verify current usage

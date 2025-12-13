@@ -84,11 +84,10 @@ impl XCWorkspaceFileLocator {
             let path = entry.path();
 
             if path.is_file() {
-                if let Some(name) = path.file_name() {
-                    if name == file_name {
+                if let Some(name) = path.file_name()
+                    && name == file_name {
                         return Ok(Some(path));
                     }
-                }
             } else if path.is_dir() {
                 // Recursively search subdirectories
                 if let Some(found) = self.search_for_file(&path, file_name)? {

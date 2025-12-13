@@ -38,7 +38,7 @@ Input format: {"operation": "list|read|search|find", "path": "/path/to/dir", "pa
         }
     }
 
-    pub fn to_anthropic_tool(&self) -> serde_json::Value {
+    pub fn to_tool_definition(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name,
             "description": self.description,

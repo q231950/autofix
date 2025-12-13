@@ -1,4 +1,5 @@
 use super::prompts;
+use crate::llm::{LLMProvider, ProviderConfig, ProviderFactory};
 use crate::rate_limiter::RateLimiter;
 use crate::tools::{
     CodeEditorInput, CodeEditorTool, DirectoryInspectorInput, DirectoryInspectorTool,
@@ -9,9 +10,7 @@ use crate::xc_test_result_attachment_handler::{
 };
 use crate::xc_workspace_file_locator::{FileLocatorError, XCWorkspaceFileLocator};
 use crate::xctestresultdetailparser::XCTestResultDetail;
-use anthropic_sdk::{
-    Anthropic, ContentBlock, ContentBlockParam, MessageContent, MessageCreateBuilder, Tool,
-};
+use anthropic_sdk::{ContentBlock, ContentBlockParam, Tool};
 use base64::Engine;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,6 +39,8 @@ pub struct AutofixPipeline {
     knightrider_mode: bool,
     verbose: bool,
     rate_limiter: Arc<RateLimiter>,
+    provider: Box<dyn LLMProvider>,
+    provider_config: ProviderConfig,
 }
 
 impl AutofixPipeline {
@@ -49,6 +50,7 @@ impl AutofixPipeline {
         workspace_path: P,
         knightrider_mode: bool,
         verbose: bool,
+        provider_config: ProviderConfig,
     ) -> Result<Self, PipelineError> {
         // Create .autofix/tmp directory in current directory
         let base_dir = PathBuf::from(".autofix/tmp");
@@ -66,8 +68,16 @@ impl AutofixPipeline {
             );
         }
 
-        // Create rate limiter from environment variables
-        let rate_limiter = Arc::new(RateLimiter::from_env(verbose));
+        // Create provider from configuration
+        let provider = ProviderFactory::create(provider_config.clone()).map_err(|e| {
+            PipelineError::AnthropicApiError(format!("Failed to create provider: {}", e))
+        })?;
+
+        // Create rate limiter for the configured provider
+        let rate_limiter = Arc::new(RateLimiter::from_env(
+            provider_config.provider_type,
+            verbose,
+        ));
 
         Ok(Self {
             xcresult_path: xcresult_path.as_ref().to_path_buf(),
@@ -76,6 +86,8 @@ impl AutofixPipeline {
             knightrider_mode,
             verbose,
             rate_limiter,
+            provider,
+            provider_config,
         })
     }
 
@@ -180,7 +192,7 @@ impl AutofixPipeline {
                 .metadata()
                 .and_then(|m| m.modified())
                 .ok()
-                .map(|t| std::cmp::Reverse(t))
+                .map(std::cmp::Reverse)
         });
 
         image_files.first().map(|entry| entry.path())
@@ -192,7 +204,7 @@ impl AutofixPipeline {
         detail: &XCTestResultDetail,
         test_file_path: &Path,
     ) -> Result<(), PipelineError> {
-        println!("Step 3: Running autofix with Claude AI...");
+        println!("Step 3: Running autofix with LLM provider...");
 
         if self.verbose {
             println!(
@@ -203,13 +215,11 @@ impl AutofixPipeline {
                     "Standard"
                 }
             );
+            println!("  [DEBUG] Provider: {:?}", self.provider.provider_type());
+            println!("  [DEBUG] Model: {}", self.provider_config.model);
             println!("  [DEBUG] Test file path: {}", test_file_path.display());
             println!("  [DEBUG] Test name: {}", detail.test_name);
         }
-
-        // Create Anthropic client from environment
-        let client =
-            Anthropic::from_env().map_err(|e| PipelineError::AnthropicApiError(e.to_string()))?;
 
         // Read the test file contents
         let test_file_contents = fs::read_to_string(test_file_path)?;
@@ -263,13 +273,78 @@ impl AutofixPipeline {
         }
 
         // Both modes use tools - the difference is in the prompt guidance
-        self.run_with_tools(client, content_blocks, detail, test_file_path)
+        self.run_with_tools(content_blocks, detail, test_file_path)
             .await
+    }
+
+    /// Convert anthropic ContentBlock to provider-agnostic ToolCall
+    fn content_block_to_tool_call(block: &ContentBlock) -> Option<crate::llm::ToolCall> {
+        match block {
+            ContentBlock::ToolUse { id, name, input } => Some(crate::llm::ToolCall {
+                id: id.clone(),
+                name: name.clone(),
+                input: input.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Convert provider-agnostic LLMResponse to anthropic Message format
+    fn llm_response_to_anthropic_message(
+        response: crate::llm::LLMResponse,
+        model: &str,
+    ) -> anthropic_sdk::Message {
+        use anthropic_sdk::{Message, Role, StopReason as AnthropicStopReason, Usage};
+
+        // Convert content and tool calls to ContentBlocks
+        let mut content_blocks = Vec::new();
+
+        // Add text content if present
+        if let Some(text) = response.content
+            && !text.is_empty() {
+                content_blocks.push(ContentBlock::Text { text });
+            }
+
+        // Add tool calls
+        for tool_call in response.tool_calls {
+            content_blocks.push(ContentBlock::ToolUse {
+                id: tool_call.id,
+                name: tool_call.name,
+                input: tool_call.input,
+            });
+        }
+
+        // Convert stop reason
+        let stop_reason = Some(match response.stop_reason {
+            crate::llm::StopReason::EndTurn => AnthropicStopReason::EndTurn,
+            crate::llm::StopReason::MaxTokens => AnthropicStopReason::MaxTokens,
+            crate::llm::StopReason::StopSequence => AnthropicStopReason::StopSequence,
+            crate::llm::StopReason::ToolUse => AnthropicStopReason::ToolUse,
+            crate::llm::StopReason::Error => AnthropicStopReason::EndTurn, // Map error to end turn
+        });
+
+        Message {
+            id: format!("msg_{}", uuid::Uuid::new_v4()),
+            type_: "message".to_string(),
+            role: Role::Assistant,
+            content: content_blocks,
+            model: model.to_string(),
+            stop_reason,
+            stop_sequence: None,
+            usage: Usage {
+                input_tokens: response.usage.input_tokens,
+                output_tokens: response.usage.output_tokens,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+                server_tool_use: None,
+                service_tier: None,
+            },
+            request_id: None,
+        }
     }
 
     async fn run_with_tools(
         &self,
-        client: Anthropic,
         initial_content: Vec<ContentBlockParam>,
         detail: &XCTestResultDetail,
         test_file_path: &Path,
@@ -279,11 +354,11 @@ impl AutofixPipeline {
         let code_tool = CodeEditorTool::new();
         let test_tool = TestRunnerTool::new();
 
-        // Build tools for Anthropic API
+        // Build tools for LLM API
         let tools: Vec<Tool> = vec![
-            serde_json::from_value(dir_tool.to_anthropic_tool()).unwrap(),
-            serde_json::from_value(code_tool.to_anthropic_tool()).unwrap(),
-            serde_json::from_value(test_tool.to_anthropic_tool()).unwrap(),
+            serde_json::from_value(dir_tool.to_tool_definition()).unwrap(),
+            serde_json::from_value(code_tool.to_tool_definition()).unwrap(),
+            serde_json::from_value(test_tool.to_tool_definition()).unwrap(),
         ];
 
         // Track conversation history: (user_content, assistant_content)
@@ -296,41 +371,75 @@ impl AutofixPipeline {
         for iteration in 0..max_iterations {
             println!("\n🤖 autofix iteration {}...", iteration + 1);
 
-            // Build the message with full conversation history
-            let mut builder = MessageCreateBuilder::new("claude-3-5-haiku-latest", 1024);
+            // Build the LLM request using provider-agnostic types
+            let mut messages = Vec::new();
 
             // Add all previous conversation turns
             for (user_content, assistant_content) in &conversation_history {
-                builder = builder.user(MessageContent::Blocks(user_content.clone()));
-
-                // Convert ContentBlock (response) to ContentBlockParam (request) for assistant message
-                let assistant_blocks: Vec<ContentBlockParam> = assistant_content
+                // Add user message
+                let user_text = user_content
                     .iter()
                     .filter_map(|block| match block {
-                        ContentBlock::Text { text } => {
-                            Some(ContentBlockParam::Text { text: text.clone() })
-                        }
-                        ContentBlock::ToolUse { id, name, input } => {
-                            Some(ContentBlockParam::ToolUse {
-                                id: id.clone(),
-                                name: name.clone(),
-                                input: input.clone(),
-                            })
-                        }
+                        ContentBlockParam::Text { text } => Some(text.clone()),
+                        ContentBlockParam::ToolResult { content, .. } => content.clone(),
                         _ => None,
                     })
-                    .collect();
+                    .collect::<Vec<_>>()
+                    .join("\n");
 
-                if !assistant_blocks.is_empty() {
-                    builder = builder.assistant(MessageContent::Blocks(assistant_blocks));
+                if !user_text.is_empty() {
+                    messages.push(crate::llm::Message {
+                        role: crate::llm::MessageRole::User,
+                        content: user_text,
+                    });
+                }
+
+                // Add assistant message
+                let assistant_text = assistant_content
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text { text } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                if !assistant_text.is_empty() {
+                    messages.push(crate::llm::Message {
+                        role: crate::llm::MessageRole::Assistant,
+                        content: assistant_text,
+                    });
                 }
             }
 
             // Add current user message
-            builder = builder.user(MessageContent::Blocks(current_user_content.clone()));
+            let current_user_text = current_user_content
+                .iter()
+                .filter_map(|block| match block {
+                    ContentBlockParam::Text { text } => Some(text.clone()),
+                    ContentBlockParam::ToolResult { content, .. } => content.clone(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
 
-            // Add tools
-            builder = builder.tools(tools.clone());
+            if !current_user_text.is_empty() {
+                messages.push(crate::llm::Message {
+                    role: crate::llm::MessageRole::User,
+                    content: current_user_text,
+                });
+            }
+
+            // Convert tools to provider-agnostic format
+            let tool_definitions: Vec<crate::llm::ToolDefinition> = tools
+                .iter()
+                .map(|tool| crate::llm::ToolDefinition {
+                    name: tool.name.clone(),
+                    description: tool.description.clone(),
+                    input_schema: serde_json::to_value(&tool.input_schema)
+                        .unwrap_or(serde_json::json!({})),
+                })
+                .collect();
 
             // Estimate token count for rate limiting
             // Rough estimation: ~4 chars per token, plus conversation history
@@ -368,15 +477,25 @@ impl AutofixPipeline {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
             }
 
-            let message = client.messages().create(builder.build()).await;
-
-            let response = match message {
-                Ok(resp) => resp,
-                Err(e) => {
-                    println!("✗ API Error: {}", e);
-                    return Err(PipelineError::AnthropicApiError(e.to_string()));
-                }
+            // Build LLMRequest
+            let llm_request = crate::llm::LLMRequest {
+                system_prompt: None,
+                messages,
+                tools: tool_definitions,
+                max_tokens: Some(1024),
+                temperature: Some(0.7),
+                stream: false,
             };
+
+            // Call provider
+            let llm_response = self.provider.complete(llm_request).await.map_err(|e| {
+                println!("✗ Provider Error: {}", e);
+                PipelineError::AnthropicApiError(format!("Provider error: {}", e))
+            })?;
+
+            // Convert response back to anthropic format for compatibility with rest of pipeline
+            let response =
+                Self::llm_response_to_anthropic_message(llm_response, &self.provider_config.model);
 
             // Record actual token usage from the API response
             let actual_input_tokens = response.usage.input_tokens as usize;
@@ -665,11 +784,10 @@ impl AutofixPipeline {
 
             if line.starts_with("File:") {
                 file_path = Some(line.trim_start_matches("File:").trim().to_string());
-            } else if line.starts_with("Line:") {
-                if let Ok(num) = line.trim_start_matches("Line:").trim().parse::<u32>() {
+            } else if line.starts_with("Line:")
+                && let Ok(num) = line.trim_start_matches("Line:").trim().parse::<u32>() {
                     line_number = Some(num);
                 }
-            }
         }
 
         // Generate Xcode deep link if we have both file and line
@@ -724,9 +842,9 @@ impl AutofixPipeline {
 
         // Convert to token estimate (rough: 1 token ≈ 4 chars)
         // Add 20% buffer for safety
-        let estimated_tokens = (char_count / 4) * 12 / 10;
+        
 
-        estimated_tokens
+        (char_count / 4) * 12 / 10
     }
 
     fn estimate_content_param_chars(&self, blocks: &[ContentBlockParam]) -> usize {
@@ -795,11 +913,13 @@ mod tests {
 
     #[test]
     fn test_pipeline_creation() {
+        let config = ProviderConfig::default();
         let pipeline = AutofixPipeline::new(
             "tests/fixtures/sample.xcresult",
             "path/to/workspace",
             false,
             false,
+            config,
         );
 
         assert!(pipeline.is_ok());
@@ -815,11 +935,13 @@ mod tests {
 
     #[test]
     fn test_pipeline_temp_dir_has_uuid() {
+        let config = ProviderConfig::default();
         let pipeline = AutofixPipeline::new(
             "tests/fixtures/sample.xcresult",
             "path/to/workspace",
             false,
             false,
+            config,
         )
         .unwrap();
 

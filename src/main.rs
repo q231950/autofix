@@ -1,4 +1,5 @@
 mod autofix_command;
+mod llm;
 mod pipeline;
 mod rate_limiter;
 mod test_command;
@@ -10,6 +11,7 @@ mod xctestresultdetailparser;
 
 use autofix_command::AutofixCommand;
 use clap::{Parser, Subcommand};
+use llm::ProviderType;
 use std::path::PathBuf;
 use test_command::TestCommand;
 
@@ -42,6 +44,14 @@ struct Args {
     #[arg(short = 'v', long, global = true)]
     verbose: bool,
 
+    /// LLM provider to use (claude, openai, ollama)
+    #[arg(long, default_value = "claude", global = true)]
+    provider: String,
+
+    /// Model to use (overrides provider default)
+    #[arg(long, global = true)]
+    model: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -60,6 +70,42 @@ enum Commands {
 async fn main() {
     let args = Args::parse();
 
+    // Load provider configuration from environment
+    let mut provider_config = match llm::ProviderConfig::from_env() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Error: Failed to load provider configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Override provider type if specified via CLI
+    let provider_type = match ProviderType::from_str(&args.provider) {
+        Ok(provider) => provider,
+        Err(e) => {
+            eprintln!("Error: Invalid provider '{}': {}", args.provider, e);
+            eprintln!("Valid providers: claude, openai, ollama");
+            std::process::exit(1);
+        }
+    };
+    provider_config.provider_type = provider_type;
+
+    // Override model if specified via CLI
+    if let Some(model) = &args.model {
+        provider_config.model = model.clone();
+    }
+
+    // Display provider info in verbose mode
+    if args.verbose {
+        println!("🔧 Configuration:");
+        println!("  Provider: {:?}", provider_config.provider_type);
+        println!("  Model: {}", provider_config.model);
+        if args.model.is_some() {
+            println!("  (model overridden via CLI)");
+        }
+        println!();
+    }
+
     match args.command {
         // Handle "autofix test --test-id ..." subcommand
         Some(Commands::Test { test_id }) => {
@@ -74,6 +120,7 @@ async fn main() {
                     test_id,
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_ios().await {
@@ -88,6 +135,7 @@ async fn main() {
                     test_id,
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_android() {
@@ -111,6 +159,7 @@ async fn main() {
                     workspace_path,
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_ios().await {
@@ -124,6 +173,7 @@ async fn main() {
                     args.workspace.unwrap_or_default(),
                     args.knightrider,
                     args.verbose,
+                    provider_config.clone(),
                 );
 
                 if let Err(e) = cmd.execute_android() {

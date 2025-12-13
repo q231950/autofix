@@ -93,8 +93,6 @@ impl XCResultParser {
         }
     }
 
-    /// Create a new XCResultParser with a custom xcresulttool path
-
     /// Parse a .xcresult bundle at the given path
     pub fn parse<P: AsRef<Path>>(
         &self,
