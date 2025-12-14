@@ -19,6 +19,7 @@ Autofix analyzes failed iOS UI tests, explores your codebase, and autonomously m
 - 🛠️ **Autonomous Code Editing**: Makes targeted code changes automatically
 - ✅ **Verification Loop**: Builds and runs tests to verify fixes work
 - 🎭 **Dual Modes**: Fix app code OR test code based on your needs
+- 🤖 **Multi-Provider Support**: Use Claude, OpenAI, or local Ollama models
 - 🔧 **Tool-Based Architecture**: Uses specialized tools for inspection, editing, and testing
 
 ## 📦 Installation
@@ -27,7 +28,10 @@ Autofix analyzes failed iOS UI tests, explores your codebase, and autonomously m
 
 - Rust (edition 2024)
 - Xcode and `xcodebuild` command-line tools
-- Anthropic API key
+- LLM Provider (choose one):
+  - **Claude** (Anthropic) - Recommended, default
+  - **OpenAI** (GPT-4, GPT-4o, etc.)
+  - **Ollama** (Local models)
 
 ### Build from Source
 
@@ -37,37 +41,76 @@ cd autofix
 cargo build --release
 ```
 
-### Environment Setup
+### LLM Provider Setup
 
-Set your Anthropic API key:
+Autofix supports three LLM providers. Choose the one that works best for you:
 
-```bash
-export ANTHROPIC_API_KEY="your-api-key-here"
-```
+#### Option 1: Claude (Anthropic) - Default
 
-#### Optional: Rate Limiting Configuration
-
-Autofix includes smart rate limiting to prevent hitting Anthropic's API limits. Configure these environment variables:
+Get your API key from [console.anthropic.com](https://console.anthropic.com/)
 
 ```bash
-# Maximum input tokens per minute (default: 50000)
-export ANTHROPIC_RATE_LIMIT_TPM=50000
-
-# Enable/disable rate limiting (default: true)
-export ANTHROPIC_RATE_LIMIT_ENABLED=true
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+# Optional: Override default model
+export AUTOFIX_MODEL="claude-sonnet-4"  # or claude-opus-4, claude-haiku-3.5
 ```
 
-**How it works:**
-- Autofix estimates token usage before each API request
-- If the request would exceed your per-minute limit, it automatically waits
-- The tool displays a message when waiting: `⏸️ Rate limit approaching. Waiting X seconds...`
-- Adjust `ANTHROPIC_RATE_LIMIT_TPM` based on your API tier:
-  - Free tier: Lower limits (check Anthropic docs)
-  - Claude Sonnet 4.x: 30,000 tokens/minute (default tier)
-  - Claude Haiku 3.5: 50,000 tokens/minute
-  - Higher tiers: Increase as needed
+#### Option 2: OpenAI
 
-**Tip:** Set `ANTHROPIC_RATE_LIMIT_ENABLED=false` to disable rate limiting entirely if you have unlimited access or want to handle rate limits manually.
+Get your API key from [platform.openai.com](https://platform.openai.com/api-keys)
+
+```bash
+export AUTOFIX_PROVIDER=openai
+export OPENAI_API_KEY="sk-..."
+# Optional: Override default model
+export AUTOFIX_MODEL="gpt-4o"  # or gpt-4-turbo, gpt-4
+```
+
+**OpenAI-Compatible Servers** (Together.ai, Groq, vLLM, etc.):
+
+```bash
+export AUTOFIX_PROVIDER=openai
+export AUTOFIX_API_BASE="https://your-server.com/v1"
+export OPENAI_API_KEY="your-key"
+export AUTOFIX_MODEL="your-model-name"
+```
+
+#### Option 3: Ollama (Local Models)
+
+Install and start Ollama, then pull a model:
+
+```bash
+# Install Ollama from ollama.ai
+ollama serve
+ollama pull llama2  # or llama3, codellama, mistral, etc.
+
+# Configure autofix
+export AUTOFIX_PROVIDER=ollama
+export AUTOFIX_MODEL="llama2"  # or your preferred model
+```
+
+#### Configuration File
+
+Alternatively, create a `.env` file (see `.env.example` for all options):
+
+```bash
+cp .env.example .env
+# Edit .env with your API keys and preferences
+```
+
+#### Rate Limiting
+
+Autofix includes smart rate limiting to prevent hitting API limits:
+
+```bash
+# Maximum tokens per minute (provider-specific defaults)
+export AUTOFIX_RATE_LIMIT_TPM=50000
+```
+
+**Default limits by provider:**
+- Claude: 30,000 TPM
+- OpenAI: 90,000 TPM
+- Ollama: Unlimited (local)
 
 ## 🚀 Usage
 
@@ -76,7 +119,20 @@ export ANTHROPIC_RATE_LIMIT_ENABLED=true
 Assumes your **app is correct** and the **test needs adjustment**:
 
 ```bash
+# Using Claude (default)
 autofix --ios \
+  --test-result path/to/test.xcresult \
+  --workspace path/to/workspace
+
+# Using OpenAI
+autofix --ios \
+  --provider openai \
+  --test-result path/to/test.xcresult \
+  --workspace path/to/workspace
+
+# Using Ollama (local)
+autofix --ios \
+  --provider ollama \
   --test-result path/to/test.xcresult \
   --workspace path/to/workspace
 ```
@@ -88,6 +144,16 @@ autofix --ios \
   --test-result path/to/test.xcresult \
   --workspace path/to/workspace \
   --verbose
+```
+
+**Override model:**
+
+```bash
+autofix --ios \
+  --provider openai \
+  --model gpt-4o \
+  --test-result path/to/test.xcresult \
+  --workspace path/to/workspace
 ```
 
 **What it does:**
@@ -202,6 +268,13 @@ Autofix uses a multi-stage pipeline:
 autofix/
 ├── src/
 │   ├── main.rs                          # CLI entry point
+│   ├── llm/                             # LLM provider abstraction
+│   │   ├── mod.rs                       # Core types & factory
+│   │   ├── provider_trait.rs            # LLMProvider trait
+│   │   ├── config.rs                    # Provider configuration
+│   │   ├── claude_provider.rs           # Claude/Anthropic impl
+│   │   ├── openai_provider.rs           # OpenAI impl
+│   │   └── ollama_provider.rs           # Ollama impl
 │   ├── pipeline/                        # Core pipeline logic
 │   │   ├── mod.rs                       # Module declarations
 │   │   ├── autofix_pipeline.rs          # Pipeline implementation
@@ -212,17 +285,19 @@ autofix/
 │   │   └── test_runner_tool.rs          # Build & test execution
 │   ├── autofix_command.rs               # Process all failed tests
 │   ├── test_command.rs                  # Single test processing
+│   ├── rate_limiter.rs                  # Provider-aware rate limiting
 │   ├── xcresultparser.rs                # Parse XCResult bundles
 │   ├── xctestresultdetailparser.rs      # Parse test details
 │   ├── xc_test_result_attachment_handler.rs  # Extract attachments
 │   └── xc_workspace_file_locator.rs     # Locate test files
 ├── Cargo.toml
+├── .env.example                         # Configuration template
 └── README.md
 ```
 
 ## 🔧 Tools
 
-Autofix provides Claude AI with three specialized tools:
+Autofix provides the LLM with three specialized tools:
 
 ### DirectoryInspectorTool
 - **Operations**: `list`, `read`, `search`, `find`
@@ -324,7 +399,7 @@ cargo build --release
 - Requires `xcodebuild` command-line tools
 - Works best with structured, well-named code
 - May need multiple iterations for complex fixes
-- Requires valid Anthropic API key
+- Requires valid API key for Claude/OpenAI, or local Ollama setup
 
 ## 🤝 Contributing
 
@@ -341,8 +416,10 @@ Contributions welcome! Please:
 
 ## 🙏 Acknowledgments
 
-- Built with [Anthropic Claude](https://anthropic.com) AI
-- Uses [anthropic-sdk-rust](https://github.com/dimichgh/anthropic-sdk-rust)
+- Built with support for multiple LLM providers:
+  - [Anthropic Claude](https://anthropic.com) via [anthropic-sdk-rust](https://github.com/dimichgh/anthropic-sdk-rust)
+  - [OpenAI](https://openai.com) via [async-openai](https://github.com/64bit/async-openai)
+  - [Ollama](https://ollama.ai) for local model support
 - Inspired by the need for better UI test maintenance
 
 ---

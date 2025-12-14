@@ -47,7 +47,7 @@ IMPORTANT: The old_content must match exactly (including whitespace and indentat
         }
     }
 
-    pub fn to_anthropic_tool(&self) -> serde_json::Value {
+    pub fn to_tool_definition(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name,
             "description": self.description,

@@ -93,8 +93,8 @@ impl XCTestResultAttachmentHandler {
         let mut newest_image: Option<(PathBuf, std::time::SystemTime)> = None;
 
         for entry in &image_entries {
-            if let Ok(metadata) = entry.metadata() {
-                if let Ok(modified) = metadata.modified() {
+            if let Ok(metadata) = entry.metadata()
+                && let Ok(modified) = metadata.modified() {
                     match &newest_image {
                         None => newest_image = Some((entry.path(), modified)),
                         Some((_, newest_time)) if modified > *newest_time => {
@@ -103,7 +103,6 @@ impl XCTestResultAttachmentHandler {
                         _ => {}
                     }
                 }
-            }
         }
 
         // Delete all files except the newest image
