@@ -55,7 +55,7 @@ jobs:
 
           ## Installation
 
-          1. Download \`autofix-macos-aarch64.zip\`
+          1. Download \`autofix-macos-aarch64.zip\` from the assets below
           2. Verify checksum (optional but recommended):
              \`\`\`bash
              shasum -a 256 -c autofix-macos-aarch64.zip.sha256
@@ -64,16 +64,23 @@ jobs:
              \`\`\`bash
              unzip autofix-macos-aarch64.zip
              \`\`\`
-          4. Move to your PATH:
+          4. Make the binary accessible from anywhere:
              \`\`\`bash
+             # Option 1: Install for all users (requires admin password)
              sudo mv autofix /usr/local/bin/
+
+             # Option 2: Install for current user only (no password needed)
+             mkdir -p ~/bin
+             mv autofix ~/bin/
+             echo 'export PATH="\$HOME/bin:\$PATH"' >> ~/.zshrc
+             source ~/.zshrc
              \`\`\`
           5. Verify installation:
              \`\`\`bash
              autofix --version
              \`\`\`
 
-          **Note**: On first run, macOS may show a security warning. If this happens, go to System Preferences → Security & Privacy and click "Allow Anyway" for autofix.
+          **Note**: On first run, macOS may show a security warning. If this happens, go to System Settings → Privacy & Security and click "Open Anyway" for autofix.
           EOF
 
       - name: Create GitHub Release
