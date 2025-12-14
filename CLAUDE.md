@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2025-12-12
 
 ## Active Technologies
+- Rust (edition 2024 per CLAUDE.md) + GitHub Actions workflows, Rust toolchain with aarch64-apple-darwin targe (002-release-build-artifacts)
+- N/A (GitHub handles artifact storage) (002-release-build-artifacts)
 
 - Rust edition 2024 (current project standard)
 - LLM Provider Abstraction:
@@ -39,6 +41,7 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust edition 2024 (current project standard): Follow standard conventions
 
 ## Recent Changes
+- 002-release-build-artifacts: Added Rust (edition 2024 per CLAUDE.md) + GitHub Actions workflows, Rust toolchain with aarch64-apple-darwin targe
 
 - 001-llm-provider-support: Comprehensive LLM provider abstraction
   - Added support for Claude, OpenAI, and Ollama providers

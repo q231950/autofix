@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Create Release with Apple Silicon Binary
+    runs-on: macos-14
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build binary for Apple Silicon
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Package binary
+        run: |
+          cd target/aarch64-apple-darwin/release
+          zip autofix-macos-aarch64.zip autofix
+
+      - name: Generate checksum
+        run: |
+          cd target/aarch64-apple-darwin/release
+          shasum -a 256 autofix-macos-aarch64.zip > autofix-macos-aarch64.zip.sha256
+
+      - name: Generate release notes
+        run: |
+          cat > RELEASE_NOTES.md <<EOF
+          ## Build Information
+
+          - **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Commit SHA**: $GITHUB_SHA
+          - **Rust Version**: $(rustc --version)
+          - **Target**: aarch64-apple-darwin
+
+          ## Checksum
+
+          \`\`\`
+          $(cat target/aarch64-apple-darwin/release/autofix-macos-aarch64.zip.sha256)
+          \`\`\`
+
+          ## Installation
+
+          1. Download \`autofix-macos-aarch64.zip\` from the assets below
+          2. Verify checksum (optional but recommended):
+             \`\`\`bash
+             shasum -a 256 -c autofix-macos-aarch64.zip.sha256
+             \`\`\`
+          3. Extract the archive:
+             \`\`\`bash
+             unzip autofix-macos-aarch64.zip
+             \`\`\`
+          4. Make the binary accessible from anywhere:
+             \`\`\`bash
+             # Option 1: Install for all users (requires admin password)
+             sudo mv autofix /usr/local/bin/
+
+             # Option 2: Install for current user only (no password needed)
+             mkdir -p ~/bin
+             mv autofix ~/bin/
+             echo 'export PATH="\$HOME/bin:\$PATH"' >> ~/.zshrc
+             source ~/.zshrc
+             \`\`\`
+          5. Verify installation:
+             \`\`\`bash
+             autofix --version
+             \`\`\`
+
+          **Note**: On first run, macOS may show a security warning. If this happens, go to System Settings → Privacy & Security and click "Open Anyway" for autofix.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/aarch64-apple-darwin/release/autofix-macos-aarch64.zip
+            target/aarch64-apple-darwin/release/autofix-macos-aarch64.zip.sha256
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
